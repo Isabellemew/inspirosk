@@ -1,16 +1,16 @@
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
 
-/* ===== TOKENS ===== */
+/* ===== TOKENS MAPPING ===== */
 :root {
-  --bg:       #050A1F;
-  --bg-card:  #0C1230;
+  --bg:       var(--dash-bg);
+  --bg-card:  var(--dash-card);
   --bg-glass: rgba(255,255,255,0.04);
-  --indigo:   #4F46E5;
-  --cyan:     #06B6D4;
-  --gold:     #F59E0B;
-  --white:    #F8FAFF;
-  --muted:    rgba(248,250,255,0.45);
-  --border:   rgba(255,255,255,0.08);
+  --indigo:   var(--primary);
+  --cyan:     var(--accent);
+  --gold:     var(--status-pending);
+  --white:    var(--text-primary);
+  --muted:    var(--text-secondary);
+  --border:   var(--border-color);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -20,6 +20,7 @@
   color: var(--white);
   font-family: 'Inter', sans-serif;
   overflow-x: hidden;
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
 /* ===== NAV ===== */
@@ -36,16 +37,16 @@
 }
 
 .land-nav--scrolled {
-  background: rgba(5, 10, 31, 0.85);
+  background: var(--dash-sidebar);
   backdrop-filter: blur(16px);
   border-color: var(--border);
 }
 
 .land-logo {
   font-family: 'Syne', sans-serif;
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 800;
-  background: linear-gradient(90deg, #818CF8, #06B6D4);
+  background: var(--gradient-logo);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -73,9 +74,10 @@
   font-weight: 600;
   padding: 9px 20px;
   border-radius: 10px;
-  transition: background 0.2s, transform 0.1s;
+  transition: all 0.2s ease, transform 0.1s;
+  box-shadow: 0 4px 14px var(--primary-glow);
 }
-.land-nav-cta:hover { background: #4338CA; transform: translateY(-1px); }
+.land-nav-cta:hover { opacity: 0.95; transform: translateY(-1px); }
 
 /* ===== HERO ===== */
 .land-hero {
@@ -97,28 +99,28 @@
   position: absolute;
   border-radius: 50%;
   filter: blur(90px);
-  opacity: 0.35;
+  opacity: 0.25;
 }
 
 .land-orb-1 {
   width: 600px; height: 600px;
-  background: radial-gradient(circle, #4F46E5, transparent 70%);
+  background: radial-gradient(circle, var(--primary), transparent 70%);
   top: -100px; left: -100px;
   animation: drift1 12s ease-in-out infinite alternate;
 }
 
 .land-orb-2 {
   width: 500px; height: 500px;
-  background: radial-gradient(circle, #06B6D4, transparent 70%);
+  background: radial-gradient(circle, var(--accent), transparent 70%);
   top: 100px; right: -50px;
   animation: drift2 15s ease-in-out infinite alternate;
 }
 
 .land-orb-3 {
   width: 300px; height: 300px;
-  background: radial-gradient(circle, #F59E0B, transparent 70%);
+  background: radial-gradient(circle, var(--gold), transparent 70%);
   bottom: 50px; left: 40%;
-  opacity: 0.2;
+  opacity: 0.15;
   animation: drift1 18s ease-in-out infinite alternate;
 }
 
@@ -135,8 +137,8 @@
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
   background-size: 60px 60px;
   mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black, transparent);
 }
@@ -149,9 +151,9 @@
 
 .land-hero-tag {
   display: inline-block;
-  background: rgba(79,70,229,0.15);
-  border: 1px solid rgba(79,70,229,0.35);
-  color: #A5B4FC;
+  background: var(--primary-glow);
+  border: 1px solid rgba(99,102,241,0.25);
+  color: var(--primary-light);
   font-size: 13px;
   font-weight: 600;
   padding: 6px 16px;
@@ -171,17 +173,11 @@
 }
 
 .land-gradient-text {
-  background: linear-gradient(135deg, #818CF8 0%, #06B6D4 50%, #F59E0B 100%);
+  background: var(--gradient-logo);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
   background-size: 200%;
-  animation: shimmer 4s linear infinite;
-}
-
-@keyframes shimmer {
-  0%   { background-position: 0% 50%; }
-  100% { background-position: 200% 50%; }
 }
 
 .land-hero-sub {
@@ -203,20 +199,20 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: linear-gradient(135deg, #4F46E5, #06B6D4);
+  background: linear-gradient(135deg, var(--primary), var(--accent));
   color: #fff;
   text-decoration: none;
   font-size: 15px;
   font-weight: 600;
   padding: 14px 28px;
   border-radius: 12px;
-  transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
-  box-shadow: 0 4px 24px rgba(79,70,229,0.4);
+  transition: all 0.2s ease, transform 0.15s;
+  box-shadow: 0 4px 24px var(--primary-glow);
 }
 .land-btn-primary:hover {
-  opacity: 0.92;
+  opacity: 0.95;
   transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(79,70,229,0.5);
+  box-shadow: 0 8px 32px var(--primary-glow);
 }
 
 .land-btn-ghost {
@@ -233,7 +229,7 @@
   border: 1px solid var(--border);
   transition: color 0.2s, border-color 0.2s;
 }
-.land-btn-ghost:hover { color: var(--white); border-color: rgba(255,255,255,0.2); }
+.land-btn-ghost:hover { color: var(--white); border-color: var(--border-hover); }
 
 /* FLOATING CARDS */
 .land-float-cards {
@@ -249,7 +245,7 @@
 }
 
 .land-fcard {
-  background: rgba(12, 18, 48, 0.85);
+  background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 14px 18px;
@@ -257,7 +253,7 @@
   align-items: center;
   gap: 12px;
   backdrop-filter: blur(12px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  box-shadow: 0 8px 32px var(--shadow);
   min-width: 240px;
 }
 
@@ -305,9 +301,9 @@
 }
 
 .land-fcard-badge--gold {
-  background: rgba(245,158,11,0.15);
+  background: var(--status-pending-bg);
   border-color: rgba(245,158,11,0.3);
-  color: #FCD34D;
+  color: var(--status-pending);
 }
 
 .land-fcard-notify {
@@ -325,7 +321,7 @@
   padding: 40px 48px;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  background: rgba(255,255,255,0.015);
+  background: rgba(255,255,255,0.01);
 }
 
 .land-stat {
@@ -341,7 +337,7 @@
   font-family: 'Syne', sans-serif;
   font-size: 44px;
   font-weight: 800;
-  background: linear-gradient(90deg, #818CF8, #06B6D4);
+  background: var(--gradient-logo);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -364,7 +360,7 @@
 
 .land-section--dark {
   max-width: 100%;
-  background: rgba(255,255,255,0.015);
+  background: rgba(255,255,255,0.01);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   padding: 100px 48px;
@@ -378,7 +374,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 1.5px;
-  color: #818CF8;
+  color: var(--primary-light);
   margin-bottom: 16px;
 }
 
@@ -404,17 +400,18 @@
   border: 1px solid var(--border);
   border-radius: 20px;
   padding: 32px 28px;
-  transition: border-color 0.2s, transform 0.2s;
+  transition: all 0.2s ease;
 }
 
 .land-feature-card:hover {
-  border-color: rgba(79,70,229,0.4);
+  border-color: rgba(99,102,241,0.3);
   transform: translateY(-4px);
+  box-shadow: 0 10px 30px var(--shadow);
 }
 
 .land-feature-icon {
   font-size: 28px;
-  color: #818CF8;
+  color: var(--primary-light);
   margin-bottom: 20px;
   display: block;
 }
@@ -455,7 +452,7 @@
   font-family: 'Syne', sans-serif;
   font-size: 48px;
   font-weight: 800;
-  background: linear-gradient(135deg, #4F46E5, #06B6D4);
+  background: var(--gradient-logo);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -489,7 +486,7 @@
 .land-cta-orb {
   position: absolute;
   width: 800px; height: 800px;
-  background: radial-gradient(circle, rgba(79,70,229,0.2), transparent 60%);
+  background: radial-gradient(circle, var(--primary-glow), transparent 60%);
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
   border-radius: 50%;
