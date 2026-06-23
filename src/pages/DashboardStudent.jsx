@@ -8,9 +8,9 @@ import {
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useNavigate } from "react-router-dom";
 import {
-  MessageSquare, Send, Paperclip, Mic, X, Download,
+  MessageSquare, Send, Paperclip, Mic, Download,
   Image as ImageIcon, LogOut, CheckCircle, Clock, FileText,
-  User, Settings, Info, Star, ShieldAlert, Upload, Palette
+  Info, Star, Upload, Palette
 } from "lucide-react";
 import "./Dashboard.css";
 
@@ -725,7 +725,7 @@ export default function DashboardStudent() {
                                   {msg.fileType === "image" && msg.fileUrl && (
                                     <img
                                       src={msg.fileUrl}
-                                      alt="image attachment"
+                                      alt="attachment"
                                       className="chat-image-preview"
                                       onClick={() => setActiveImageUrl(msg.fileUrl)}
                                     />

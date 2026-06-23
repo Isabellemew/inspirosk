@@ -6,7 +6,7 @@ import {
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import {
-  BarChart2, Users, Folder, FileText, MessageSquare, LogOut, Trash2, Shield, Palette
+  BarChart2, Users, Folder, FileText, MessageSquare, LogOut, Trash2, Palette, CheckCircle
 } from "lucide-react";
 import "./Dashboard.css";
 
