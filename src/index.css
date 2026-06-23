@@ -1,13 +1,190 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Inter:wght@400;500;600;700&display=swap');
+
+/* Default Theme: Cosmic Dark */
+:root, body[data-theme="cosmic-dark"] {
+  --dash-bg: #060b26;
+  --dash-sidebar: #090f30;
+  --dash-card: #0f174a;
+  --dash-main: #070d2d;
+  --text-primary: #ffffff;
+  --text-secondary: #9ab0e5;
+  --text-muted: rgba(255, 255, 255, 0.4);
+  --text-muted2: rgba(255, 255, 255, 0.2);
+  --primary: #4f46e5;
+  --primary-light: #818cf8;
+  --primary-glow: rgba(79, 70, 229, 0.35);
+  --accent: #06b6d4;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.16);
+  --shadow: rgba(0, 0, 0, 0.4);
+  --input-bg: rgba(255, 255, 255, 0.04);
+  --card-hover-bg: rgba(255, 255, 255, 0.02);
+  --scroll-thumb: rgba(255, 255, 255, 0.15);
+  --gradient-logo: linear-gradient(90deg, #818cf8, #06b6d4);
+  --status-pending: #f59e0b;
+  --status-accepted: #10b981;
+  --status-rejected: #ef4444;
+  --status-interview: #3b82f6;
+  --status-pending-bg: rgba(245, 158, 11, 0.12);
+  --status-accepted-bg: rgba(16, 185, 129, 0.12);
+  --status-rejected-bg: rgba(239, 68, 68, 0.12);
+  --status-interview-bg: rgba(59, 130, 246, 0.12);
+}
+
+/* Modern Light Theme */
+body[data-theme="modern-light"] {
+  --dash-bg: #f3f4f6;
+  --dash-sidebar: #ffffff;
+  --dash-card: #ffffff;
+  --dash-main: #f9fafb;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --text-muted2: #cbd5e1;
+  --primary: #6366f1;
+  --primary-light: #818cf8;
+  --primary-glow: rgba(99, 102, 241, 0.15);
+  --accent: #0ea5e9;
+  --border-color: #e5e7eb;
+  --border-hover: #d1d5db;
+  --shadow: rgba(15, 23, 42, 0.05);
+  --input-bg: #f9fafb;
+  --card-hover-bg: #f9fafb;
+  --scroll-thumb: rgba(15, 23, 42, 0.1);
+  --gradient-logo: linear-gradient(90deg, #6366f1, #0ea5e9);
+  --status-pending: #d97706;
+  --status-accepted: #059669;
+  --status-rejected: #dc2626;
+  --status-interview: #2563eb;
+  --status-pending-bg: rgba(217, 119, 6, 0.1);
+  --status-accepted-bg: rgba(5, 150, 105, 0.1);
+  --status-rejected-bg: rgba(220, 38, 38, 0.1);
+  --status-interview-bg: rgba(37, 99, 235, 0.1);
+}
+
+/* Neon Cyberpunk Theme */
+body[data-theme="neon-cyberpunk"] {
+  --dash-bg: #090a0f;
+  --dash-sidebar: #0d0e15;
+  --dash-card: #121420;
+  --dash-main: #0b0c12;
+  --text-primary: #00ffcc;
+  --text-secondary: #ff007f;
+  --text-muted: #6b7280;
+  --text-muted2: #374151;
+  --primary: #ff007f;
+  --primary-light: #ff66b2;
+  --primary-glow: rgba(255, 0, 127, 0.35);
+  --accent: #00ffcc;
+  --border-color: rgba(0, 255, 204, 0.15);
+  --border-hover: rgba(255, 0, 127, 0.4);
+  --shadow: rgba(255, 0, 127, 0.15);
+  --input-bg: #16192b;
+  --card-hover-bg: rgba(0, 255, 204, 0.02);
+  --scroll-thumb: rgba(0, 255, 204, 0.25);
+  --gradient-logo: linear-gradient(90deg, #ff007f, #00ffcc);
+  --status-pending: #ffea00;
+  --status-accepted: #00ffcc;
+  --status-rejected: #ff0055;
+  --status-interview: #00bfff;
+  --status-pending-bg: rgba(255, 234, 0, 0.12);
+  --status-accepted-bg: rgba(0, 255, 204, 0.12);
+  --status-rejected-bg: rgba(255, 0, 85, 0.12);
+  --status-interview-bg: rgba(0, 191, 255, 0.12);
+}
+
+/* Emerald Forest Theme */
+body[data-theme="emerald-forest"] {
+  --dash-bg: #06110d;
+  --dash-sidebar: #091a14;
+  --dash-card: #0d261e;
+  --dash-main: #071712;
+  --text-primary: #e6f4f0;
+  --text-secondary: #8cbda9;
+  --text-muted: rgba(230, 244, 240, 0.4);
+  --text-muted2: rgba(230, 244, 240, 0.18);
+  --primary: #059669;
+  --primary-light: #34d399;
+  --primary-glow: rgba(5, 150, 105, 0.35);
+  --accent: #10b981;
+  --border-color: rgba(52, 211, 153, 0.1);
+  --border-hover: rgba(52, 211, 153, 0.25);
+  --shadow: rgba(0, 0, 0, 0.5);
+  --input-bg: rgba(255, 255, 255, 0.03);
+  --card-hover-bg: rgba(52, 211, 153, 0.02);
+  --scroll-thumb: rgba(52, 211, 153, 0.15);
+  --gradient-logo: linear-gradient(90deg, #34d399, #10b981);
+  --status-pending: #fbbf24;
+  --status-accepted: #34d399;
+  --status-rejected: #f87171;
+  --status-interview: #60a5fa;
+  --status-pending-bg: rgba(251, 191, 36, 0.12);
+  --status-accepted-bg: rgba(52, 211, 153, 0.12);
+  --status-rejected-bg: rgba(248, 113, 113, 0.12);
+  --status-interview-bg: rgba(96, 165, 250, 0.12);
+}
+
+/* Sunset Glow Theme */
+body[data-theme="sunset-glow"] {
+  --dash-bg: #130a1c;
+  --dash-sidebar: #1d0f28;
+  --dash-card: #281537;
+  --dash-main: #190e24;
+  --text-primary: #fdfaff;
+  --text-secondary: #cba2e0;
+  --text-muted: rgba(253, 250, 255, 0.4);
+  --text-muted2: rgba(253, 250, 255, 0.18);
+  --primary: #8b5cf6;
+  --primary-light: #a78bfa;
+  --primary-glow: rgba(139, 92, 246, 0.35);
+  --accent: #f59e0b;
+  --border-color: rgba(167, 139, 250, 0.1);
+  --border-hover: rgba(245, 158, 11, 0.25);
+  --shadow: rgba(19, 10, 28, 0.5);
+  --input-bg: rgba(255, 255, 255, 0.03);
+  --card-hover-bg: rgba(167, 139, 250, 0.02);
+  --scroll-thumb: rgba(167, 139, 250, 0.15);
+  --gradient-logo: linear-gradient(90deg, #a78bfa, #f59e0b);
+  --status-pending: #f59e0b;
+  --status-accepted: #10b981;
+  --status-rejected: #ef4444;
+  --status-interview: #8b5cf6;
+  --status-pending-bg: rgba(245, 158, 11, 0.12);
+  --status-accepted-bg: rgba(16, 185, 129, 0.12);
+  --status-rejected-bg: rgba(239, 68, 68, 0.12);
+  --status-interview-bg: rgba(139, 92, 246, 0.12);
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  background-color: var(--dash-bg);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+/* Custom Scrollbar for rich UI experience */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary-light);
 }
