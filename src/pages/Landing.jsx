@@ -73,13 +73,19 @@ export default function Landing() {
             inspirosk соединяет студентов с научными лабораториями университетов.<br />
             Подавай заявки, общайся с профессорами и начинай исследовать.
           </p>
-          <div className="land-hero-actions">
+          <div className="land-hero-actions" style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center" }}>
             <Link to="/register/student" className="land-btn-primary">
               Я студент
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </Link>
             <Link to="/register/professor" className="land-btn-ghost">
-              Я исследователь
+              Я профессор / Лаб
+            </Link>
+            <Link to="/register/independent" className="land-btn-ghost" style={{ border: "1px dashed var(--primary-light)" }}>
+              Я соавтор
+            </Link>
+            <Link to="/register/business" className="land-btn-ghost" style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid #f59e0b", color: "#f59e0b" }}>
+              Бизнес / Инвестор
             </Link>
           </div>
         </div>
@@ -170,6 +176,8 @@ export default function Landing() {
         <div className="land-footer-links">
           <Link to="/register/student">Студентам</Link>
           <Link to="/register/professor">Профессорам</Link>
+          <Link to="/register/independent">Соавторам</Link>
+          <Link to="/register/business">Инвесторам</Link>
           <Link to="/login">Войти</Link>
         </div>
       </footer>

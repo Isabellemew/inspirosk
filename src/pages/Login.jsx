@@ -26,6 +26,8 @@ const handleLogin = async (e) => {
 
     if (role === "admin") navigate("/dashboardAdmin");
     else if (role === "professor") navigate("/dashboardProfessor");
+    else if (role === "independent") navigate("/dashboardIndependent");
+    else if (role === "business") navigate("/dashboardBusiness");
     else navigate("/dashboardStudent");
 
   } catch (err) {
@@ -75,10 +77,14 @@ const handleLogin = async (e) => {
 
         <div className="auth-links">
           <p>Нет аккаунта?</p>
-          <div className="role-links">
+          <div className="role-links" style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap" }}>
             <Link to="/register/student">Студент</Link>
             <span>·</span>
             <Link to="/register/professor">Профессор</Link>
+            <span>·</span>
+            <Link to="/register/independent">Соавтор</Link>
+            <span>·</span>
+            <Link to="/register/business">Бизнес / Инвестор</Link>
           </div>
         </div>
       </div>

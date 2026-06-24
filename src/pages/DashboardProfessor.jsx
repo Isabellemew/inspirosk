@@ -10,7 +10,7 @@ import { useNavigate } from "react-router-dom";
 import {
   MessageSquare, Send, Paperclip, Mic, Download,
   Image as ImageIcon, LogOut, CheckCircle, Clock, FileText,
-  Info, Upload, Palette
+  Info, Upload, Palette, Briefcase
 } from "lucide-react";
 import "./Dashboard.css";
 
@@ -119,11 +119,15 @@ export default function DashboardProfessor() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSent, setFeedbackSent] = useState(false);
+  const [businessChallenges, setBusinessChallenges] = useState([]);
 
   // Lab and Profile Form states
   const [labForm, setLabForm] = useState({
     name: "", description: "", researchAreas: [], openSpots: 3,
-    requirements: "", responsibilities: "", benefits: "", papers: ""
+    requirements: "", responsibilities: "", benefits: "", papers: "",
+    noExperienceOk: false, prepLevel: "beginner", internationalOk: false,
+    challenges: "", howToApply: "", isCommercial: false,
+    fundingNeeded: "", prototypeStatus: "", marketPotential: ""
   });
   const [profileForm, setProfileForm] = useState({
     name: "", university: "", department: "", position: "",
@@ -199,14 +203,38 @@ export default function DashboardProfessor() {
       if (!labSnap.empty) {
         const labData = { id: labSnap.docs[0].id, ...labSnap.docs[0].data() };
         setLab(labData);
+        setLabForm({
+          name: labData.name || "",
+          description: labData.description || "",
+          researchAreas: labData.researchAreas || [],
+          openSpots: labData.openSpots || 3,
+          requirements: labData.requirements || "",
+          responsibilities: labData.responsibilities || "",
+          benefits: labData.benefits || "",
+          papers: labData.papers || "",
+          noExperienceOk: !!labData.noExperienceOk,
+          prepLevel: labData.prepLevel || "beginner",
+          internationalOk: !!labData.internationalOk,
+          challenges: labData.challenges || "",
+          howToApply: labData.howToApply || "",
+          isCommercial: !!labData.isCommercial,
+          fundingNeeded: labData.fundingNeeded || "",
+          prototypeStatus: labData.prototypeStatus || "",
+          marketPotential: labData.marketPotential || ""
+        });
 
-        // Fetch Applications for this lab
+        // Fetch Applications for this professor
         const appsSnap = await getDocs(
-          query(collection(db, "applications"), where("labId", "==", labData.id))
+          query(collection(db, "applications"), where("professorId", "==", user.uid))
         );
         const apps = appsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         setApplications(apps);
       }
+
+      // Fetch Business Challenges
+      const bcSnap = await getDocs(collection(db, "business_challenges"));
+      setBusinessChallenges(bcSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
       setLoading(false);
     };
 
@@ -272,14 +300,30 @@ export default function DashboardProfessor() {
 
   const handleCreateLab = async () => {
     const user = auth.currentUser;
-    const newLab = await addDoc(collection(db, "labs"), {
+    const labData = {
       ...labForm,
       professorId: user.uid,
       professorName: userData?.name || user.email,
       openSpots: Number(labForm.openSpots),
+      noExperienceOk: !!labForm.noExperienceOk,
+      prepLevel: labForm.prepLevel || "beginner",
+      internationalOk: !!labForm.internationalOk,
+      challenges: labForm.challenges || "",
+      howToApply: labForm.howToApply || "",
+      isCommercial: !!labForm.isCommercial,
+      fundingNeeded: labForm.isCommercial ? Number(labForm.fundingNeeded || 0) : 0,
+      prototypeStatus: labForm.isCommercial ? labForm.prototypeStatus || "" : "",
+      marketPotential: labForm.isCommercial ? labForm.marketPotential || "" : "",
       createdAt: serverTimestamp(),
-    });
-    setLab({ id: newLab.id, ...labForm, professorId: user.uid });
+    };
+
+    if (lab?.id) {
+      await updateDoc(doc(db, "labs", lab.id), labData);
+      setLab({ id: lab.id, ...labData });
+    } else {
+      const newLab = await addDoc(collection(db, "labs"), labData);
+      setLab({ id: newLab.id, ...labData });
+    }
     setShowLabForm(false);
   };
 
@@ -473,6 +517,7 @@ export default function DashboardProfessor() {
             ["students", "👥 Студенты", accepted.length],
             ["chat", "💬 Чат", chatApps.length],
             ["lab", "🏛 Лаборатория", 0],
+            ["business-challenges", "💼 Запросы бизнеса", businessChallenges.length],
             ["profile", "👤 Профиль", 0],
             ["support", "🛠 Поддержка", 0],
           ].map(([tab, label, count]) => (
@@ -757,18 +802,94 @@ export default function DashboardProfessor() {
                 <div className="profile-row"><span>Требования:</span> <span>{lab.requirements || "—"}</span></div>
                 <div className="profile-row"><span>Обязанности:</span> <span>{lab.responsibilities || "—"}</span></div>
                 <div className="profile-row"><span>Что получит студент:</span> <span>{lab.benefits || "—"}</span></div>
-                <div className="profile-row">
+                
+                <hr style={{ borderColor: "var(--border-color)", margin: "8px 0" }} />
+                <h3 style={{ margin: 0, color: "var(--primary-light)" }}>Прозрачность для студентов</h3>
+                <div className="profile-row"><span>Без опыта:</span> <span>{lab.noExperienceOk ? "Да 👍" : "Нет"}</span></div>
+                <div className="profile-row"><span>Уровень подготовки:</span> <span>{lab.prepLevel === "beginner" ? "Начальный" : lab.prepLevel === "intermediate" ? "Средний" : "Продвинутый"}</span></div>
+                <div className="profile-row"><span>Иностранные студенты:</span> <span>{lab.internationalOk ? "Да 🌍" : "Нет"}</span></div>
+                <div className="profile-row"><span>Сложности/Вызовы:</span> <span>{lab.challenges || "—"}</span></div>
+                <div className="profile-row"><span>Инструкция по подаче:</span> <span>{lab.howToApply || "—"}</span></div>
+
+                <hr style={{ borderColor: "var(--border-color)", margin: "8px 0" }} />
+                <h3 style={{ margin: 0, color: "var(--status-pending)" }}>Коммерциализация и бизнес</h3>
+                <div className="profile-row"><span>Статус продукта:</span> <span>{lab.isCommercial ? "Прикладной коммерческий продукт 💰" : "Академическое исследование"}</span></div>
+                {lab.isCommercial && (
+                  <>
+                    <div className="profile-row"><span>Финансирование ($):</span> <span>{lab.fundingNeeded?.toLocaleString() || "—"}</span></div>
+                    <div className="profile-row"><span>Статус прототипа:</span> <span>{lab.prototypeStatus || "—"}</span></div>
+                    <div className="profile-row"><span>Рыночный потенциал:</span> <span>{lab.marketPotential || "—"}</span></div>
+                  </>
+                )}
+
+                <div className="profile-row" style={{ marginTop: 12 }}>
                   <span>Направления:</span>
                   <div className="lab-tags">{lab.researchAreas?.map(a => <span key={a} className="tag">{a}</span>)}</div>
                 </div>
                 <div className="profile-row"><span>Мест всего:</span> <span>{lab.openSpots}</span></div>
                 {lab.papers && <div className="profile-row"><span>Публикации:</span> <span>{lab.papers}</span></div>}
+                
+                <button className="btn-apply" style={{ marginTop: 16, width: "max-content" }} onClick={() => setShowLabForm(true)}>✏️ Редактировать лабораторию</button>
               </div>
             ) : (
               <div className="empty-state">
                 <Info size={32} />
                 У вас ещё нет лаборатории. Создайте её, чтобы начать привлекать студентов.
                 <button className="btn-apply" style={{ marginTop: 16 }} onClick={() => setShowLabForm(true)}>+ Создать лабораторию</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── ЗАПРОСЫ БИЗНЕСА ── */}
+        {activeTab === "business-challenges" && (
+          <div className="dash-content">
+            <h1>Запросы бизнеса (R&D)</h1>
+            <p className="dash-subtitle">Научно-прикладные проблемы предприятий Казахстана, требующие решения</p>
+            {businessChallenges.length === 0 ? (
+              <div className="empty-state"><Briefcase size={32} />Запросов от компаний пока нет.</div>
+            ) : (
+              <div className="labs-grid">
+                {businessChallenges.map(ch => (
+                  <div className="lab-card" key={ch.id} style={{ borderLeft: "4px solid var(--status-pending)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <h3>{ch.title}</h3>
+                      <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)" }}>$ {ch.budget?.toLocaleString()}</span>
+                    </div>
+                    <p style={{ fontSize: 13, color: "var(--primary-light)", margin: "4px 0" }}>🏢 Компания: {ch.companyName}</p>
+                    <p className="lab-desc">{ch.description}</p>
+                    <div style={{ background: "var(--input-bg)", padding: 10, borderRadius: 8, margin: "10px 0", fontSize: 12 }}>
+                      <p style={{ margin: "2px 0" }}>⏳ <strong>Дедлайн:</strong> {ch.deadline || "Не ограничен"}</p>
+                      <p style={{ margin: "2px 0" }}>🔬 <strong>Направление:</strong> {ch.researchArea}</p>
+                    </div>
+                    <button className="btn-apply" onClick={async () => {
+                      const user = auth.currentUser;
+                      const coopData = {
+                        studentId: ch.companyId,
+                        studentName: ch.companyName,
+                        studentEmail: "",
+                        labId: ch.id,
+                        labName: `R&D: ${ch.title}`,
+                        professorId: user.uid,
+                        motivation: `Наша лаборатория заинтересована в решении вашего R&D запроса: "${ch.title}". Готовы обсудить сотрудничество.`,
+                        status: "accepted", // Accepted immediately so chat is active
+                        createdAt: serverTimestamp(),
+                      };
+                      await addDoc(collection(db, "applications"), coopData);
+                      
+                      // Refresh applications
+                      const appsSnap = await getDocs(
+                        query(collection(db, "applications"), where("professorId", "==", user.uid))
+                      );
+                      setApplications(appsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+                      
+                      alert("Диалог начат! Перейдите во вкладку 'Чат' для связи.");
+                      setActiveTab("chat");
+                    }}>
+                      Связаться / Предложить решение
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -889,7 +1010,7 @@ export default function DashboardProfessor() {
       {showLabForm && (
         <div className="modal-overlay" onClick={() => setShowLabForm(false)}>
           <div className="modal" style={{ maxWidth: 560, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
-            <h2>Создать лабораторию</h2>
+            <h2>{lab ? "Редактировать лабораторию" : "Создать лабораторию"}</h2>
             {[
               ["name", "Название лаборатории", "AI & Robotics Lab"],
               ["description", "Описание исследований", "Чем занимается лаборатория..."],
@@ -909,6 +1030,99 @@ export default function DashboardProfessor() {
                 />
               </div>
             ))}
+
+            <hr style={{ borderColor: "var(--border-color)", margin: "10px 0" }} />
+            <h3 style={{ margin: 0, color: "var(--primary-light)" }}>Прозрачность</h3>
+            
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <input type="checkbox" checked={labForm.noExperienceOk} onChange={e => setLabForm({ ...labForm, noExperienceOk: e.target.checked })} />
+              <label style={{ fontSize: 13 }}>Готовы брать студентов без опыта?</label>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <input type="checkbox" checked={labForm.internationalOk} onChange={e => setLabForm({ ...labForm, internationalOk: e.target.checked })} />
+              <label style={{ fontSize: 13 }}>Подходит для иностранных студентов?</label>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: 13, color: "var(--text-secondary)", fontWeight: 600 }}>Требуемый уровень подготовки</label>
+              <select
+                style={{ padding: "10px 14px", background: "var(--input-bg)", border: "1px solid var(--border-color)", color: "var(--text-primary)", borderRadius: 10, fontSize: 14, width: "100%", boxSizing: "border-box", outline: "none" }}
+                value={labForm.prepLevel}
+                onChange={e => setLabForm({ ...labForm, prepLevel: e.target.value })}
+              >
+                <option value="beginner">Начальный (Beginner)</option>
+                <option value="intermediate">Средний (Intermediate)</option>
+                <option value="advanced">Продвинутый (Advanced)</option>
+              </select>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: 13, color: "var(--text-secondary)", fontWeight: 600 }}>Сложности и вызовы (Честно опишите трудности/нагрузку)</label>
+              <textarea
+                rows={2}
+                style={{ width: "100%", padding: "10px 14px", background: "var(--input-bg)", border: "1px solid var(--border-color)", color: "var(--text-primary)", borderRadius: 10, fontFamily: "inherit", fontSize: 14, resize: "vertical", outline: "none", boxSizing: "border-box" }}
+                value={labForm.challenges}
+                onChange={e => setLabForm({ ...labForm, challenges: e.target.value })}
+                placeholder="Например: Высокая математическая сложность, требуется 15 часов в неделю..."
+              />
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: 13, color: "var(--text-secondary)", fontWeight: 600 }}>Инструкция: как подать заявку</label>
+              <textarea
+                rows={2}
+                style={{ width: "100%", padding: "10px 14px", background: "var(--input-bg)", border: "1px solid var(--border-color)", color: "var(--text-primary)", borderRadius: 10, fontFamily: "inherit", fontSize: 14, resize: "vertical", outline: "none", boxSizing: "border-box" }}
+                value={labForm.howToApply}
+                onChange={e => setLabForm({ ...labForm, howToApply: e.target.value })}
+                placeholder="Например: 1. Отправьте резюме. 2. Решите тестовое задание по ссылке..."
+              />
+            </div>
+
+            <hr style={{ borderColor: "var(--border-color)", margin: "10px 0" }} />
+            <h3 style={{ margin: 0, color: "var(--status-pending)" }}>Коммерциализация</h3>
+
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <input type="checkbox" checked={labForm.isCommercial} onChange={e => setLabForm({ ...labForm, isCommercial: e.target.checked })} />
+              <label style={{ fontSize: 13, fontWeight: "bold" }}>Проект имеет коммерческую ценность / прикладной характер</label>
+            </div>
+
+            {labForm.isCommercial && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingLeft: 12, borderLeft: "2px solid var(--status-pending)" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <label style={{ fontSize: 12 }}>Необходимый объем финансирования ($)</label>
+                  <input
+                    type="number"
+                    style={{ padding: "8px 12px", background: "var(--input-bg)", border: "1px solid var(--border-color)", color: "var(--text-primary)", borderRadius: 8, fontSize: 13 }}
+                    value={labForm.fundingNeeded}
+                    onChange={e => setLabForm({ ...labForm, fundingNeeded: e.target.value })}
+                  />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <label style={{ fontSize: 12 }}>Статус прототипа</label>
+                  <input
+                    type="text"
+                    style={{ padding: "8px 12px", background: "var(--input-bg)", border: "1px solid var(--border-color)", color: "var(--text-primary)", borderRadius: 8, fontSize: 13 }}
+                    value={labForm.prototypeStatus}
+                    onChange={e => setLabForm({ ...labForm, prototypeStatus: e.target.value })}
+                    placeholder="MVP / Альфа / Чертежи"
+                  />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <label style={{ fontSize: 12 }}>Рыночный потенциал</label>
+                  <textarea
+                    rows={2}
+                    style={{ width: "100%", padding: "8px 12px", background: "var(--input-bg)", border: "1px solid var(--border-color)", color: "var(--text-primary)", borderRadius: 8, fontFamily: "inherit", fontSize: 13 }}
+                    value={labForm.marketPotential}
+                    onChange={e => setLabForm({ ...labForm, marketPotential: e.target.value })}
+                    placeholder="Какую проблему на рынке решает?"
+                  />
+                </div>
+              </div>
+            )}
+
+            <hr style={{ borderColor: "var(--border-color)", margin: "10px 0" }} />
+
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <label style={{ fontSize: 13, color: "var(--text-secondary)", fontWeight: 600 }}>Направления исследований</label>
               <div className="lab-tags" style={{ gap: 8 }}>
@@ -941,7 +1155,7 @@ export default function DashboardProfessor() {
             </div>
             <div className="modal-actions">
               <button className="btn-secondary" onClick={() => setShowLabForm(false)}>Отмена</button>
-              <button className="btn-apply" onClick={handleCreateLab}>Создать</button>
+              <button className="btn-apply" onClick={handleCreateLab}>{lab ? "Сохранить" : "Создать"}</button>
             </div>
           </div>
         </div>

@@ -7,9 +7,13 @@ import Login from "./pages/Login.jsx";
 import RegisterStudent from "./pages/Registerstudent.jsx";
 import RegisterProfessor from "./pages/Registerpofessor.jsx";
 import RegisterAdmin from "./pages/Registeradmin.jsx";
+import RegisterIndependent from "./pages/Registerindependent.jsx";
+import RegisterBusiness from "./pages/Registerbusiness.jsx";
 import DashboardStudent from "./pages/DashboardStudent.jsx";
 import DashboardProfessor from "./pages/DashboardProfessor.jsx";
 import DashboardAdmin from "./pages/DashboardAdmin.jsx";
+import DashboardIndependent from "./pages/DashboardIndependent.jsx";
+import DashboardBusiness from "./pages/DashboardBusiness.jsx";
 import Landing from "./pages/Landing.jsx";
 
 function PrivateRoute({ children }) {
@@ -37,10 +41,14 @@ export default function App() {
         <Route path="/register/student" element={<RegisterStudent />} />
         <Route path="/register/professor" element={<RegisterProfessor />} />
         <Route path="/register/admin" element={<RegisterAdmin />} />
+        <Route path="/register/independent" element={<RegisterIndependent />} />
+        <Route path="/register/business" element={<RegisterBusiness />} />
 
         <Route path="/dashboardStudent" element={<PrivateRoute><DashboardStudent /></PrivateRoute>} />
         <Route path="/dashboardProfessor" element={<PrivateRoute><DashboardProfessor /></PrivateRoute>} />
         <Route path="/dashboardAdmin" element={<PrivateRoute><DashboardAdmin /></PrivateRoute>} />
+        <Route path="/dashboardIndependent" element={<PrivateRoute><DashboardIndependent /></PrivateRoute>} />
+        <Route path="/dashboardBusiness" element={<PrivateRoute><DashboardBusiness /></PrivateRoute>} />
 
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/login" replace />} />

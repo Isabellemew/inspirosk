@@ -123,6 +123,14 @@ export default function DashboardStudent() {
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSent, setFeedbackSent] = useState(false);
 
+  // Search & Filters State
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterArea, setFilterArea] = useState("");
+  const [filterNoExp, setFilterNoExp] = useState(false);
+  const [filterIntl, setFilterIntl] = useState(false);
+  const [filterPrepLevel, setFilterPrepLevel] = useState("");
+  const [filterCommercial, setFilterCommercial] = useState(false);
+
   // Profile Form State
   const [profileForm, setProfileForm] = useState({
     name: "", university: "", degree: "", year: "",
@@ -470,6 +478,17 @@ export default function DashboardStudent() {
   const chatApps = myApplications.filter(a => a.status === "accepted" || a.status === "interview");
   const initials = userData?.name?.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() || "S";
 
+  // Filter Labs Logic
+  const filteredLabs = labs.filter(lab => {
+    const matchesSearch = lab.name?.toLowerCase().includes(searchQuery.toLowerCase()) || lab.description?.toLowerCase().includes(searchQuery.toLowerCase()) || lab.professorName?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesArea = !filterArea || lab.researchAreas?.includes(filterArea);
+    const matchesNoExp = !filterNoExp || lab.noExperienceOk === true;
+    const matchesIntl = !filterIntl || lab.internationalOk === true;
+    const matchesPrep = !filterPrepLevel || lab.prepLevel === filterPrepLevel;
+    const matchesComm = !filterCommercial || lab.isCommercial === true;
+    return matchesSearch && matchesArea && matchesNoExp && matchesIntl && matchesPrep && matchesComm;
+  });
+
   // Find active chat details
   const activeChatApp = chatApps.find(a => a.id === activeChatId);
 
@@ -503,11 +522,12 @@ export default function DashboardStudent() {
 
         <nav className="dash-nav">
           {[
-            ["discover", "🔍 Лаборатории", 0],
+            ["discover", "🔍 Лаборатории", filteredLabs.length],
             ["recommended", "⭐ Рекомендации", recommendedLabs.length],
             ["applications", "📋 Мои заявки", myApplications.length],
             ["chat", "💬 Чат", chatApps.length],
             ["profile", "👤 Профиль", 0],
+            ["knowledge-hub", "📚 База знаний", 0],
             ["support", "🛠 Поддержка", 0],
           ].map(([tab, label, count]) => (
             <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
@@ -530,47 +550,112 @@ export default function DashboardStudent() {
           <div className="dash-content">
             <h1>Все лаборатории</h1>
             <p className="dash-subtitle">Найдите научный проект для старта карьеры</p>
-            {labs.length === 0 && <div className="empty-state"><Info size={32} />Пока нет лабораторий. Подождите, пока профессора зарегистрируются.</div>}
+            
+            {/* Filters Bar */}
+            <div className="filters-bar" style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap", background: "var(--dash-card)", padding: "14px", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+              <input
+                type="text"
+                placeholder="Поиск по названию или профессору..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", flex: 1, minWidth: "200px" }}
+              />
+              <select
+                value={filterArea}
+                onChange={e => setFilterArea(e.target.value)}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)" }}
+              >
+                <option value="">Все направления</option>
+                {RESEARCH_AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+              <select
+                value={filterPrepLevel}
+                onChange={e => setFilterPrepLevel(e.target.value)}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)" }}
+              >
+                <option value="">Любая подготовка</option>
+                <option value="beginner">Начальный уровень</option>
+                <option value="intermediate">Средний уровень</option>
+                <option value="advanced">Продвинутый уровень</option>
+              </select>
+              <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
+                  <input type="checkbox" checked={filterNoExp} onChange={e => setFilterNoExp(e.target.checked)} />
+                  Без опыта 👍
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
+                  <input type="checkbox" checked={filterIntl} onChange={e => setFilterIntl(e.target.checked)} />
+                  Ин. студенты 🌍
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
+                  <input type="checkbox" checked={filterCommercial} onChange={e => setFilterCommercial(e.target.checked)} />
+                  Коммерческие 💰
+                </label>
+              </div>
+            </div>
+
+            {filteredLabs.length === 0 && <div className="empty-state"><Info size={32} />Совпадений не найдено. Попробуйте сбросить фильтры.</div>}
+            
             <div className="labs-grid">
-              {labs.map(lab => {
+              {filteredLabs.map(lab => {
                 const chatApp = myApplications.find(a => a.labId === lab.id && (a.status === "accepted" || a.status === "interview"));
                 return (
-                  <div className="lab-card" key={lab.id}>
-                    <div className="lab-header">
-                      <h3>{lab.name}</h3>
+                  <div className="lab-card" key={lab.id} style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", borderLeft: lab.isCommercial ? "4px solid var(--status-pending)" : "1px solid var(--border-color)" }}>
+                    <div>
+                      <div className="lab-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <h3>{lab.name}</h3>
+                        {lab.isCommercial && <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)", fontSize: 11 }}>💰 Прикладной/R&D</span>}
+                      </div>
+                      
+                      <div
+                        className="lab-professor-row"
+                        onClick={() => chatApp && handleJumpToChat(lab.id)}
+                        title={chatApp ? "Нажмите, чтобы открыть чат с профессором" : ""}
+                        style={{ margin: "8px 0" }}
+                      >
+                        <div className="lab-prof-avatar">👨‍🔬</div>
+                        <p className="lab-professor">
+                          👨‍🔬 {lab.professorName} {lab.isIndependent ? "(Независимый)" : ""}
+                          {chatApp && <span style={{ fontSize: 11, marginLeft: 6, textDecoration: "underline" }}>(Чат 💬)</span>}
+                        </p>
+                      </div>
+                      
+                      <p className="lab-desc">{lab.description}</p>
+                      
+                      {/* Transparency and Commercial tags on card */}
+                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", margin: "8px 0" }}>
+                        {lab.noExperienceOk && <span className="tag" style={{ background: "rgba(16,185,129,0.12)", color: "#10b981", fontSize: 11 }}>Без опыта 👍</span>}
+                        {lab.internationalOk && <span className="tag" style={{ background: "rgba(59,130,246,0.12)", color: "#3b82f6", fontSize: 11 }}>Ин. студенты 🌍</span>}
+                        <span className="tag" style={{ background: "rgba(129,140,248,0.12)", color: "var(--primary-light)", fontSize: 11 }}>
+                          Подготовка: {lab.prepLevel === "beginner" ? "Начальный" : lab.prepLevel === "intermediate" ? "Средний" : "Продвинутый"}
+                        </span>
+                      </div>
+                      
+                      {lab.requirements && <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0" }}>📋 Требования: {lab.requirements.slice(0, 80)}...</p>}
                     </div>
-                    {/* Clickable Professor Avatar / Name Card */}
-                    <div
-                      className="lab-professor-row"
-                      onClick={() => chatApp && handleJumpToChat(lab.id)}
-                      title={chatApp ? "Нажмите, чтобы открыть чат с профессором" : ""}
-                    >
-                      <div className="lab-prof-avatar">👨‍🔬</div>
-                      <p className="lab-professor">
-                        👨‍🔬 {lab.professorName}
-                        {chatApp && <span style={{ fontSize: 11, marginLeft: 6, textDecoration: "underline" }}>(Чат 💬)</span>}
-                      </p>
-                    </div>
-                    <p className="lab-desc">{lab.description}</p>
-                    {lab.requirements && <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>📋 Требования: {lab.requirements}</p>}
-                    <div className="lab-tags">{lab.researchAreas?.map(a => <span key={a} className="tag">{a}</span>)}</div>
-                    <div className="lab-footer">
-                      <span className="lab-spots">Мест: {lab.openSpots || "?"}</span>
-                      {appliedLabIds.includes(lab.id)
-                        ? (
-                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                            <span className={`status-badge ${statusClass(myApplications.find(a => a.labId === lab.id)?.status)}`}>
-                              {statusLabel(myApplications.find(a => a.labId === lab.id)?.status)}
-                            </span>
-                            {chatApp && (
-                              <button className="btn-secondary" style={{ padding: "6px 10px" }} onClick={() => handleJumpToChat(lab.id)}>
-                                <MessageSquare size={13} />
-                              </button>
-                            )}
-                          </div>
-                        )
-                        : <button className="btn-apply" onClick={() => setApplyingTo(lab)}>Подать заявку</button>
-                      }
+
+                    <div>
+                      <div className="lab-tags">{lab.researchAreas?.map(a => <span key={a} className="tag">{a}</span>)}</div>
+                      
+                      <div className="lab-footer">
+                        <span className="lab-spots">Мест: {lab.openSpots || "?"}</span>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          {appliedLabIds.includes(lab.id) ? (
+                            <>
+                              <span className={`status-badge ${statusClass(myApplications.find(a => a.labId === lab.id)?.status)}`}>
+                                {statusLabel(myApplications.find(a => a.labId === lab.id)?.status)}
+                              </span>
+                              {chatApp && (
+                                <button className="btn-secondary" style={{ padding: "6px 10px" }} onClick={() => handleJumpToChat(lab.id)}>
+                                  <MessageSquare size={13} />
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <button className="btn-apply" onClick={() => setApplyingTo(lab)}>Подробнее & Подать</button>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );
@@ -943,6 +1028,54 @@ export default function DashboardStudent() {
             }
           </div>
         )}
+
+        {/* ── БАЗА ЗНАНИЙ ── */}
+        {activeTab === "knowledge-hub" && (
+          <div className="dash-content">
+            <h1>📚 База Знаний (Knowledge Hub)</h1>
+            <p className="dash-subtitle">Руководство для студентов без опыта о том, как начать научную карьеру</p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              <div className="lab-card" style={{ padding: 20 }}>
+                <h3 style={{ color: "var(--primary-light)" }}>🔬 С чего начать, если нет опыта?</h3>
+                <p style={{ fontSize: 14 }}>
+                  Профессора не ожидают от студентов младших курсов готовых научных открытий. Главное — это ваши <strong>интересы</strong> и <strong>готовность учиться</strong>.
+                </p>
+                <ul style={{ fontSize: 14, paddingLeft: 20, margin: "10px 0" }}>
+                  <li>Изучите фильтр <strong>«Без опыта»</strong>, чтобы найти лаборатории, открытые к новичкам.</li>
+                  <li>Посмотрите требования: часто достаточно базового понимания программирования (Python) или школьной программы химии/физики.</li>
+                  <li>Будьте готовы уделить проекту от 8 до 15 часов в неделю.</li>
+                </ul>
+              </div>
+
+              <div className="lab-card" style={{ padding: 20 }}>
+                <h3 style={{ color: "var(--status-pending)" }}>✍️ Как написать сильное мотивационное письмо?</h3>
+                <p style={{ fontSize: 14 }}>
+                  Мотивационное письмо — ваш главный шанс выделиться. Не пишите общие фразы. Используйте этот шаблон:
+                </p>
+                <div style={{ background: "var(--input-bg)", padding: 12, borderRadius: 8, margin: "10px 0", fontSize: 13, borderLeft: "3px solid var(--status-pending)" }}>
+                  <p style={{ margin: "2px 0" }}>1. <strong>Приветствие и цель:</strong> «Здравствуйте! Я студент 2 курса КБТУ, меня очень интересует ваша работа в области ИИ в медицине...»</p>
+                  <p style={{ margin: "2px 0" }}>2. <strong>Почему эта тема:</strong> «Я прочитал абстракт вашей последней статьи о сегментации снимков МРТ. Хотел бы помочь вашей команде в оптимизации этой модели...»</p>
+                  <p style={{ margin: "2px 0" }}>3. <strong>Ваши навыки:</strong> «Я прошел курс Python для Data Science, умею работать с Git и библиотекой PyTorch. Готов выполнять рутинные задачи и учиться...»</p>
+                </div>
+              </div>
+
+              <div className="lab-card" style={{ padding: 20 }}>
+                <h3 style={{ color: "var(--status-accepted)" }}>🌍 Возможности для иностранных студентов</h3>
+                <p style={{ fontSize: 14 }}>
+                  Многие лаборатории ведут исследования полностью на английском языке и открыты для иностранных студентов. Используйте фильтр <strong>«Иностранные студенты»</strong>, чтобы найти проекты, где рабочий язык — английский, и нет жестких требований к гражданству.
+                </p>
+              </div>
+
+              <div className="lab-card" style={{ padding: 20 }}>
+                <h3 style={{ color: "var(--status-interview)" }}>💡 Что такое прикладные (коммерческие) проекты?</h3>
+                <p style={{ fontSize: 14 }}>
+                  Некоторые работы направлены на создание реальных стартапов и продуктов. Если проект отмечен тегом <strong>💰 Коммерческий</strong>, это значит, что команда ищет не просто академический интерес, а планирует привлечь инвесторов, создать MVP или выйти на рынок. Работа в таких проектах даст вам неоценимый продуктовый и инженерный опыт.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* ── IMAGE LIGHTBOX MODAL ── */}
@@ -953,25 +1086,94 @@ export default function DashboardStudent() {
         </div>
       )}
 
-      {/* ── МОДАЛКА ЗАЯВКИ ── */}
+      {/* ── МОДАЛКА ЗАЯВКИ И ПОДРОБНОСТЕЙ (ПОДРОБНЫЙ TRANSPARENCY VIEW) ── */}
       {applyingTo && (
         <div className="modal-overlay" onClick={() => setApplyingTo(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>Заявка в «{applyingTo.name}»</h2>
-            <p>Расскажите, почему вы хотите попасть именно в эту лабораторию:</p>
-            <textarea value={motivation} onChange={e => setMotivation(e.target.value)} placeholder="Мотивационное письмо..." rows={5} />
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 8 }}>📄 Прикрепите CV (PDF, необязательно)</label>
-              <input ref={cvInputRef} type="file" accept=".pdf,.doc,.docx" style={{ display: "none" }} onChange={e => setCvFile(e.target.files[0])} />
-              <button className="btn-secondary" onClick={() => cvInputRef.current.click()}>
-                {cvFile ? `✓ ${cvFile.name}` : "Выбрать файл"}
-              </button>
+          <div className="modal" style={{ maxWidth: 800, width: "90%", maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-color)", paddingBottom: 12 }}>
+              <h2 style={{ margin: 0 }}>{applyingTo.name}</h2>
+              <button className="btn-secondary" onClick={() => setApplyingTo(null)} style={{ padding: "4px 8px", fontSize: 16 }}>×</button>
             </div>
-            <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => setApplyingTo(null)}>Отмена</button>
-              <button className="btn-apply" onClick={() => handleApply(applyingTo)} disabled={cvUploading}>
-                {cvUploading ? "Отправка..." : "Отправить заявку"}
-              </button>
+            
+            <p className="lab-professor" style={{ color: "var(--primary-light)", marginTop: 8 }}>
+              👨‍🔬 Руководитель: {applyingTo.professorName} {applyingTo.isIndependent ? "(Независимый проект)" : ""}
+            </p>
+            
+            <div className="unified-modal-content" style={{ display: "flex", gap: "24px", marginTop: "15px", flexWrap: "wrap" }}>
+              <div className="unified-modal-details" style={{ flex: 1.2, minWidth: "280px" }}>
+                <h4 style={{ margin: "0 0 6px 0", color: "var(--primary-light)" }}>🔬 Описание проекта:</h4>
+                <p style={{ fontSize: 13.5, lineHeight: 1.5 }}>{applyingTo.description}</p>
+                
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", margin: "14px 0" }}>
+                  {applyingTo.noExperienceOk ? (
+                    <span className="tag" style={{ background: "rgba(16,185,129,0.15)", color: "#10b981", fontWeight: 600 }}>Без опыта 👍</span>
+                  ) : (
+                    <span className="tag" style={{ background: "rgba(239,68,68,0.1)", color: "#ef4444" }}>Опыт обязателен</span>
+                  )}
+                  {applyingTo.internationalOk && <span className="tag" style={{ background: "rgba(59,130,246,0.15)", color: "#3b82f6", fontWeight: 600 }}>Иностранным студентам 🌍</span>}
+                  <span className="tag" style={{ background: "rgba(129,140,248,0.15)", color: "var(--primary-light)" }}>
+                    Подготовка: {applyingTo.prepLevel === "beginner" ? "Начальный" : applyingTo.prepLevel === "intermediate" ? "Средний" : "Продвинутый"}
+                  </span>
+                  {applyingTo.isCommercial && <span className="tag" style={{ background: "rgba(245,158,11,0.15)", color: "#f59e0b", fontWeight: 600 }}>💰 Коммерческий</span>}
+                </div>
+                
+                <h4 style={{ margin: "14px 0 4px 0", color: "var(--primary-light)" }}>📋 Требования и квалификации:</h4>
+                <p style={{ fontSize: 13, background: "var(--input-bg)", padding: 10, borderRadius: 8 }}>{applyingTo.requirements || "Специфических требований нет"}</p>
+                
+                <h4 style={{ margin: "14px 0 4px 0", color: "var(--status-rejected)" }}>⚠️ Вызовы и сложности (Честный обзор):</h4>
+                <p style={{ fontSize: 13, background: "rgba(239,68,68,0.05)", padding: 10, borderRadius: 8, borderLeft: "3px solid var(--status-rejected)" }}>
+                  {applyingTo.challenges || "Типичная нагрузка исследовательской работы. Особых вызовов не указано."}
+                </p>
+
+                <h4 style={{ margin: "14px 0 4px 0", color: "var(--status-accepted)" }}>📝 Инструкции по подаче:</h4>
+                <p style={{ fontSize: 13, background: "rgba(16,185,129,0.05)", padding: 10, borderRadius: 8, borderLeft: "3px solid var(--status-accepted)" }}>
+                  {applyingTo.howToApply || "Напишите краткое мотивационное письмо справа и прикрепите резюме."}
+                </p>
+
+                {applyingTo.isCommercial && (
+                  <div style={{ background: "rgba(245,158,11,0.05)", padding: 12, borderRadius: 8, marginTop: 14, borderLeft: "3px solid var(--status-pending)" }}>
+                    <h4 style={{ margin: "0 0 6px 0", color: "var(--status-pending)" }}>💰 Коммерческий потенциал:</h4>
+                    <p style={{ margin: "4px 0", fontSize: 12 }}><strong>Необходимое финансирование:</strong> ${applyingTo.fundingNeeded?.toLocaleString() || "не указано"}</p>
+                    <p style={{ margin: "4px 0", fontSize: 12 }}><strong>Статус прототипа:</strong> {applyingTo.prototypeStatus || "в разработке"}</p>
+                    <p style={{ margin: "4px 0", fontSize: 12 }}><strong>Рыночная ценность:</strong> {applyingTo.marketPotential || "высокая"}</p>
+                  </div>
+                )}
+              </div>
+              
+              <div className="unified-modal-form" style={{ flex: 1, minWidth: "280px", borderLeft: "1px solid var(--border-color)", paddingLeft: "24px" }}>
+                {appliedLabIds.includes(applyingTo.id) ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12, justifyContent: "center", height: "100%", alignItems: "center", padding: "40px 0" }}>
+                    <span className={`status-badge ${statusClass(myApplications.find(a => a.labId === applyingTo.id)?.status)}`} style={{ fontSize: 14, padding: "8px 16px" }}>
+                      Статус: {statusLabel(myApplications.find(a => a.labId === applyingTo.id)?.status)}
+                    </span>
+                    <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>Вы уже подали заявку в этот проект. Вы можете связаться с руководителем в чате, если статус «Принят» или «Интервью».</p>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <h3 style={{ margin: 0 }}>Подать заявку</h3>
+                    <div className="field-group">
+                      <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>Мотивационное письмо</label>
+                      <textarea
+                        value={motivation}
+                        onChange={e => setMotivation(e.target.value)}
+                        placeholder="Напишите, почему вы хотите участвовать, какие навыки планируете применить..."
+                        rows={6}
+                        style={{ width: "100%", padding: "10px 14px", background: "var(--input-bg)", border: "1px solid var(--border-color)", color: "#fff", borderRadius: 8, fontFamily: "inherit", fontSize: 13.5 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 8 }}>📄 Прикрепить резюме / CV (PDF, необязательно)</label>
+                      <input ref={cvInputRef} type="file" accept=".pdf,.doc,.docx" style={{ display: "none" }} onChange={e => setCvFile(e.target.files[0])} />
+                      <button className="btn-secondary" onClick={() => cvInputRef.current.click()} style={{ width: "100%" }}>
+                        {cvFile ? `✓ ${cvFile.name}` : "Выбрать файл резюме"}
+                      </button>
+                    </div>
+                    <button className="btn-apply" onClick={() => handleApply(applyingTo)} disabled={cvUploading} style={{ width: "100%", marginTop: 12, padding: "12px" }}>
+                      {cvUploading ? "Отправка..." : "Отправить заявку в проект"}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
