@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { Bell, Palette, Globe, Check, CheckSquare } from "lucide-react";
+import { Bell, Palette, Globe, CheckSquare } from "lucide-react";
 import { useTranslation } from "../context/TranslationContext";
 import { supabase } from "../supabaseClient";
 
 export default function Header({ userProfile, onOpenSettings }) {
-  const { lang, setLang, t } = useTranslation();
+  const { lang, setLang } = useTranslation();
   const [showBellDropdown, setShowBellDropdown] = useState(false);
   const [notifications, setNotifications] = useState([]);
   

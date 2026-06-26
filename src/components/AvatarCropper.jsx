@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Upload, Camera, ZoomIn, ZoomOut, Check, RotateCcw } from "lucide-react";
+import { Upload, ZoomIn, ZoomOut, Check, RotateCcw } from "lucide-react";
 import { useTranslation } from "../context/TranslationContext";
 
 export default function AvatarCropper({ onCropComplete, onCancel }) {
@@ -9,7 +9,6 @@ export default function AvatarCropper({ onCropComplete, onCancel }) {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [fileName, setFileName] = useState("");
 
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -26,7 +25,6 @@ export default function AvatarCropper({ onCropComplete, onCancel }) {
       return;
     }
 
-    setFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => {
       setImageSrc(reader.result);
@@ -237,7 +235,7 @@ export default function AvatarCropper({ onCropComplete, onCancel }) {
             <button 
               type="button" 
               className="btn-secondary" 
-              onClick={() => { setImageSrc(null); setFileName(""); if (onCancel) onCancel(); }}
+              onClick={() => { setImageSrc(null); if (onCancel) onCancel(); }}
               style={{ flex: 1 }}
             >
               Сбросить

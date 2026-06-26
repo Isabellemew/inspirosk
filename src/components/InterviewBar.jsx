@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 import { 
-  Calendar, Clock, Video, Bell, Check, AlertCircle, Play, 
-  Trash2, Plus, Monitor, ShieldAlert 
+  Calendar, Clock, Video, Bell, Check, Play, 
+  Trash2, Plus 
 } from "lucide-react";
 import { useTranslation } from "../context/TranslationContext";
 
@@ -235,11 +235,6 @@ export default function InterviewBar({ application, currentUserRole, onUpdate })
         requireInteraction: true
       });
     }, 1500);
-  };
-
-  const isInterviewTime = () => {
-    // For prototype purposes, let them connect if they have booked a slot
-    return !!selectedSlot;
   };
 
   return (

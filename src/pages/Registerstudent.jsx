@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import "./Auth.css";
 import { supabase } from "../supabaseClient.js";
 import { useTranslation } from "../context/TranslationContext";
@@ -13,7 +13,6 @@ const RESEARCH_AREAS = [
 
 export default function RegisterStudent() {
   const { lang, setLang, t } = useTranslation();
-  const navigate = useNavigate();
 
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
@@ -25,6 +24,7 @@ export default function RegisterStudent() {
   const [avatarDataUrl, setAvatarDataUrl] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isRegistered, setIsRegistered] = useState(false);
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
 
@@ -138,13 +138,38 @@ export default function RegisterStudent() {
       });
       if (dbErr) throw dbErr;
 
-      navigate("/dashboardStudent");
+      setIsRegistered(true);
     } catch (err) {
-      setError(err.message || "Ошибка регистрации. Попробуй ещё раз.");
+      let friendlyError = err.message || "Ошибка регистрации. Попробуй ещё раз.";
+      if (err.message && (err.message.toLowerCase().includes("rate limit") || err.message.toLowerCase().includes("exceeded") || err.message.toLowerCase().includes("once every"))) {
+        friendlyError = "Вы слишком часто отправляете запросы. Пожалуйста, проверьте вашу почту или попробуйте зарегистрироваться снова через несколько минут.";
+      }
+      setError(friendlyError);
     } finally {
       setLoading(false);
     }
   };
+
+  if (isRegistered) {
+    return (
+      <div className="auth-page">
+        <div className="auth-card wide" style={{ textAlign: "center", padding: "40px 24px" }}>
+          <div className="auth-logo" style={{ marginBottom: 24, justifyContent: "center", display: "flex" }}>
+            <span className="logo-text">inspirosk</span>
+          </div>
+          <div style={{ fontSize: 54, marginBottom: 20 }}>✉️</div>
+          <h2 style={{ marginBottom: 16, color: "var(--text-primary)" }}>{t("auth.check_email_title") || "Подтвердите Email"}</h2>
+          <p style={{ color: "var(--text-secondary)", fontSize: 14, lineHeight: "1.6", marginBottom: 28, maxWidth: 400, margin: "0 auto 28px auto" }}>
+            Мы отправили ссылку для активации аккаунта на адрес <strong>{form.email}</strong>. 
+            Пожалуйста, перейдите по ссылке в письме, чтобы подтвердить ваш адрес электронной почты и завершить регистрацию.
+          </p>
+          <Link to="/login" className="auth-btn" style={{ display: "inline-block", textDecoration: "none", width: "auto", padding: "12px 32px", margin: "0 auto" }}>
+            {t("auth.back_to_login") || "Вернуться ко входу"}
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="auth-page">

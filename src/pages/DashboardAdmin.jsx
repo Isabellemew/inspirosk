@@ -3,14 +3,12 @@ import { supabase } from "../supabaseClient.js";
 import { useNavigate } from "react-router-dom";
 import {
   BarChart2, Users, Folder, FileText, MessageSquare, LogOut, Trash2, Palette, CheckCircle,
-  ShieldAlert, Edit, Eye, EyeOff, Award, AlertTriangle, Info, Play
+  ShieldAlert, Edit
 } from "lucide-react";
 import "./Dashboard.css";
-import { useTranslation } from "../context/TranslationContext";
 import Header from "../components/Header.jsx";
 
 export default function DashboardAdmin() {
-  const { t } = useTranslation();
 
   // Moderation state
   const [editingLab, setEditingLab] = useState(null);
@@ -124,12 +122,45 @@ export default function DashboardAdmin() {
   };
 
   const handleDeleteUser = async (userId) => {
-    if (!window.confirm("Вы уверены, что хотите удалить пользователя?")) return;
-    const { error } = await supabase.from("profiles").delete().eq("id", userId);
-    if (error) {
-      alert("Ошибка удаления: " + error.message);
-    } else {
-      setUsers(prev => prev.filter(u => u.id !== userId));
+    if (!window.confirm("Вы уверены, что хотите полностью удалить пользователя из базы данных и системы аутентификации?")) return;
+    try {
+      const res = await fetch("http://localhost:8000/api/delete-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId })
+      });
+      if (res.status === 200) {
+        setUsers(prev => prev.filter(u => u.id !== userId));
+        alert("Пользователь успешно полностью удален!");
+        return;
+      }
+    } catch (e) {
+      // Backend offline, proceed to DB fallbacks
+    }
+
+    // Fallback 1: Try database RPC function (security definer to delete from auth.users)
+    try {
+      const { error: rpcErr } = await supabase.rpc("delete_user_by_admin", { target_user_id: userId });
+      if (!rpcErr) {
+        setUsers(prev => prev.filter(u => u.id !== userId));
+        alert("Пользователь успешно полностью удален (через базу данных)!");
+        return;
+      }
+    } catch (err) {
+      // RPC call failed, proceed to profile deletion fallback
+    }
+
+    // Fallback 2: Delete profile row only
+    try {
+      const { error } = await supabase.from("profiles").delete().eq("id", userId);
+      if (error) {
+        alert("Ошибка удаления профиля: " + error.message);
+      } else {
+        setUsers(prev => prev.filter(u => u.id !== userId));
+        alert("Профиль удален (для полного удаления из системы аутентификации запустите backend сервер или примените RPC).");
+      }
+    } catch (e) {
+      alert("Ошибка при попытке удаления: " + e.message);
     }
   };
 

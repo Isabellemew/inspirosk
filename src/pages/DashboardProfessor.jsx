@@ -2,105 +2,13 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient.js";
 import { useNavigate } from "react-router-dom";
 import {
-  MessageSquare, Send, Paperclip, Mic, Download,
-  Image as ImageIcon, LogOut, CheckCircle, Clock, FileText,
-  Info, Upload, Palette, Briefcase, Video, Star, ShieldAlert
+  MessageSquare, Send, LogOut, CheckCircle, Clock,
+  Info, Upload, Palette, Briefcase, ShieldAlert
 } from "lucide-react";
 import "./Dashboard.css";
 import { useTranslation } from "../context/TranslationContext";
 import Header from "../components/Header.jsx";
 import InterviewBar from "../components/InterviewBar.jsx";
-
-// ── CUSTOM AUDIO PLAYER COMPONENT ──
-function AudioPlayer({ src, duration }) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [playbackRate, setPlaybackRate] = useState(1);
-  const audioRef = useRef(null);
-
-  const togglePlay = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
-    }
-    setIsPlaying(!isPlaying);
-  };
-
-  const handleTimeUpdate = () => {
-    setCurrentTime(audioRef.current.currentTime);
-  };
-
-  const handleEnded = () => {
-    setIsPlaying(false);
-    setCurrentTime(0);
-  };
-
-  const handleSliderChange = (e) => {
-    const time = Number(e.target.value);
-    audioRef.current.currentTime = time;
-    setCurrentTime(time);
-  };
-
-  const changeSpeed = () => {
-    let nextRate = 1;
-    if (playbackRate === 1) nextRate = 1.5;
-    else if (playbackRate === 1.5) nextRate = 2;
-    else nextRate = 1;
-
-    setPlaybackRate(nextRate);
-    if (audioRef.current) {
-      audioRef.current.playbackRate = nextRate;
-    }
-  };
-
-  const formatTime = (secs) => {
-    if (isNaN(secs)) return "0:00";
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}:${s < 10 ? "0" : ""}${s}`;
-  };
-
-  return (
-    <div className="audio-message-player">
-      <audio
-        ref={audioRef}
-        src={src}
-        onTimeUpdate={handleTimeUpdate}
-        onEnded={handleEnded}
-      />
-      <button className="audio-play-btn" onClick={togglePlay}>
-        {isPlaying ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-          </svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8 5v14l11-7z" />
-          </svg>
-        )}
-      </button>
-      <div className="audio-wave-container">
-        <input
-          type="range"
-          min="0"
-          max={audioRef.current?.duration || duration || 100}
-          value={currentTime}
-          onChange={handleSliderChange}
-          className="audio-progress-bar"
-        />
-        <div className="audio-time-row">
-          <span>{formatTime(currentTime)}</span>
-          <span>{formatTime(duration || audioRef.current?.duration)}</span>
-        </div>
-      </div>
-      <button className="audio-speed-btn" onClick={changeSpeed}>
-        {playbackRate}x
-      </button>
-    </div>
-  );
-}
 
 export default function DashboardProfessor() {
   const { t } = useTranslation();
@@ -134,8 +42,6 @@ export default function DashboardProfessor() {
   const [scoringAppId, setScoringAppId] = useState(null);
   const [profSearchQuery, setProfSearchQuery] = useState("");
   const [profMinAiScore, setProfMinAiScore] = useState("");
-  // Video room creation states
-  const [videoGeneratingAppId, setVideoGeneratingAppId] = useState(null);
   const [joiningVideoRoom, setJoiningVideoRoom] = useState(null);
   // Mobile sidebar state
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -163,8 +69,6 @@ export default function DashboardProfessor() {
   const [activeImageUrl, setActiveImageUrl] = useState(null);
 
   const fileInputRef = useRef(null);
-  const imageAttachInputRef = useRef(null);
-  const fileAttachInputRef = useRef(null);
   const chatBottomRef = useRef(null);
   const navigate = useNavigate();
 
@@ -414,27 +318,6 @@ export default function DashboardProfessor() {
     await fetchApps(user.id);
   };
 
-  // Daily.co Video Room trigger
-  const handleGenerateVideoRoom = async (appId) => {
-    setVideoGeneratingAppId(appId);
-    try {
-      const res = await fetch("http://localhost:8000/api/create-video-room", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ application_id: appId })
-      });
-      const data = await res.json();
-      if (data.room_url) {
-        alert("Видео-комната успешно создана!");
-        await fetchApps(user.id);
-      } else {
-        alert("Не удалось создать видео-комнату.");
-      }
-    } catch {
-      alert("Ошибка подключения к backend на http://localhost:8000. Запустите Python сервер.");
-    }
-    setVideoGeneratingAppId(null);
-  };
 
   // AI applicant score trigger
   const handleScoreApplication = async (appId) => {
@@ -472,40 +355,6 @@ export default function DashboardProfessor() {
     });
   };
 
-  const handleAttachUpload = async (e, type) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    if (file.size > 10 * 1024 * 1024) {
-      return alert("Файл слишком большой. Максимальный лимит: 10МБ.");
-    }
-
-    try {
-      const fileName = `${activeChatId}/${Date.now()}_${file.name}`;
-      const { error: uploadErr } = await supabase.storage
-        .from("chats")
-        .upload(fileName, file);
-
-      if (uploadErr) throw uploadErr;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from("chats")
-        .getPublicUrl(fileName);
-
-      await supabase.from("messages").insert({
-        application_id: activeChatId,
-        text: type === "image" ? "" : file.name,
-        file_url: publicUrl,
-        file_name: file.name,
-        file_type: type,
-        sender_id: user.id,
-        sender_name: userData?.name || "Профессор",
-        sender_role: "professor",
-      });
-    } catch (err) {
-      alert("Не удалось отправить файл: " + err.message);
-    }
-  };
 
   const handleSendFeedback = async () => {
     if (!feedbackText.trim()) return;

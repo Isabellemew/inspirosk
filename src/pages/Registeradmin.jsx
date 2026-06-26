@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../supabaseClient.js";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import "./Auth.css";
 
 // 🔐 Секретный код — поменяй на свой и храни в .env
@@ -10,7 +10,7 @@ export default function RegisterAdmin() {
   const [form, setForm] = useState({ email: "", password: "", secretCode: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
+  const [isRegistered, setIsRegistered] = useState(false);
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
 
@@ -39,13 +39,38 @@ export default function RegisterAdmin() {
       });
       if (dbErr) throw dbErr;
 
-      navigate("/dashboardAdmin");
+      setIsRegistered(true);
     } catch (err) {
-      setError(err.message || "Ошибка. Попробуй ещё раз.");
+      let friendlyError = err.message || "Ошибка. Попробуй ещё раз.";
+      if (err.message && (err.message.toLowerCase().includes("rate limit") || err.message.toLowerCase().includes("exceeded") || err.message.toLowerCase().includes("once every"))) {
+        friendlyError = "Вы слишком часто отправляете запросы. Пожалуйста, проверьте вашу почту или попробуйте зарегистрироваться снова через несколько минут.";
+      }
+      setError(friendlyError);
     } finally {
       setLoading(false);
     }
   };
+
+  if (isRegistered) {
+    return (
+      <div className="auth-page">
+        <div className="auth-card" style={{ textAlign: "center", padding: "40px 24px" }}>
+          <div className="auth-logo" style={{ marginBottom: 24, justifyContent: "center", display: "flex" }}>
+            <span className="logo-text">inspirosk</span>
+          </div>
+          <div style={{ fontSize: 54, marginBottom: 20 }}>✉️</div>
+          <h2 style={{ marginBottom: 16, color: "var(--text-primary)" }}>Подтвердите Email</h2>
+          <p style={{ color: "var(--text-secondary)", fontSize: 14, lineHeight: "1.6", marginBottom: 28, maxWidth: 400, margin: "0 auto 28px auto" }}>
+            Мы отправили ссылку для активации аккаунта администратора на адрес <strong>{form.email}</strong>. 
+            Пожалуйста, перейдите по ссылке в письме, чтобы подтвердить ваш адрес электронной почты и завершить регистрацию.
+          </p>
+          <Link to="/login" className="auth-btn" style={{ display: "inline-block", textDecoration: "none", width: "auto", padding: "12px 32px", margin: "0 auto" }}>
+            Вернуться ко входу
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="auth-page">

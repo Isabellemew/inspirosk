@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient.js";
 import { useNavigate } from "react-router-dom";
 import {
-  MessageSquare, Send, Paperclip, LogOut, CheckCircle, Clock, FileText,
-  Info, Star, Upload, Palette, Plus, UserPlus, Heart, ShieldAlert, Video, Briefcase
+  Send, LogOut, Clock, FileText,
+  Info, Palette, Plus, UserPlus, ShieldAlert, Video, Briefcase
 } from "lucide-react";
 import "./Dashboard.css";
 import { useTranslation } from "../context/TranslationContext";
@@ -70,7 +70,6 @@ export default function DashboardIndependent() {
   const [challengeSearchQuery, setChallengeSearchQuery] = useState("");
   const [challengeMinBudget, setChallengeMinBudget] = useState("");
 
-  const fileInputRef = useRef(null);
   const chatBottomRef = useRef(null);
   const navigate = useNavigate();
 

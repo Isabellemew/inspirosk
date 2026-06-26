@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient.js";
 import { useNavigate } from "react-router-dom";
 import {
-  MessageSquare, Send, Paperclip, LogOut, CheckCircle, Clock, FileText,
-  Info, Star, Upload, Palette, Plus, Landmark, Briefcase, ShieldAlert, Video
+  Send, LogOut, Clock,
+  Palette, Plus, Landmark, Briefcase, ShieldAlert, Video
 } from "lucide-react";
 import "./Dashboard.css";
 import { useTranslation } from "../context/TranslationContext";
@@ -276,8 +276,8 @@ export default function DashboardBusiness() {
         <div className="dash-logo">inspirosk</div>
 
         <div className="dash-user">
-          <div className="dash-avatar" style={{ background: "linear-gradient(135deg, #d97706, #f59e0b)" }}>
-            {initials}
+          <div className="dash-avatar" style={userData?.avatar_url ? { padding: 0, overflow: "hidden", background: "linear-gradient(135deg, #d97706, #f59e0b)" } : { background: "linear-gradient(135deg, #d97706, #f59e0b)" }}>
+            {userData?.avatar_url ? <img src={userData.avatar_url} alt="avatar" /> : initials}
           </div>
           <div>
             <div className="dash-username">{userData?.name || "Инвестор"}</div>
