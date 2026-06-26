@@ -132,6 +132,8 @@ export default function DashboardProfessor() {
 
   // AI scoring states
   const [scoringAppId, setScoringAppId] = useState(null);
+  const [profSearchQuery, setProfSearchQuery] = useState("");
+  const [profMinAiScore, setProfMinAiScore] = useState("");
   // Video room creation states
   const [videoGeneratingAppId, setVideoGeneratingAppId] = useState(null);
   const [joiningVideoRoom, setJoiningVideoRoom] = useState(null);
@@ -522,9 +524,22 @@ export default function DashboardProfessor() {
     setActiveChatId(appId);
   };
 
-  const pending = applications.filter(a => a.status === "pending");
-  const interview = applications.filter(a => a.status === "interview");
-  const accepted = applications.filter(a => a.status === "accepted");
+  const applyProfFilters = (list) => {
+    return list.filter(app => {
+      const matchesSearch = !profSearchQuery || 
+        app.student_name?.toLowerCase().includes(profSearchQuery.toLowerCase()) || 
+        app.student_email?.toLowerCase().includes(profSearchQuery.toLowerCase()) ||
+        app.motivation?.toLowerCase().includes(profSearchQuery.toLowerCase());
+      
+      const matchesAi = !profMinAiScore || (app.ai_score !== undefined && app.ai_score !== null && app.ai_score >= Number(profMinAiScore));
+      
+      return matchesSearch && matchesAi;
+    });
+  };
+
+  const pending = applyProfFilters(applications.filter(a => a.status === "pending"));
+  const interview = applyProfFilters(applications.filter(a => a.status === "interview"));
+  const accepted = applyProfFilters(applications.filter(a => a.status === "accepted"));
   const chatApps = applications.filter(a => a.status === "accepted" || a.status === "interview");
   const initials = userData?.name?.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() || "P";
 
@@ -621,6 +636,29 @@ export default function DashboardProfessor() {
           <div className="dash-content">
             <h1>Входящие заявки</h1>
             <p className="dash-subtitle">Рассмотрите кандидатуры студентов на свободные места</p>
+
+            {lab && (
+              <div className="filters-bar" style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap", background: "var(--dash-card)", padding: "14px", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+                <input
+                  type="text"
+                  placeholder="Поиск по имени, email или мотивации..."
+                  value={profSearchQuery}
+                  onChange={e => setProfSearchQuery(e.target.value)}
+                  style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", flex: 1, minWidth: "200px" }}
+                />
+                <select
+                  value={profMinAiScore}
+                  onChange={e => setProfMinAiScore(e.target.value)}
+                  style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", outline: "none" }}
+                >
+                  <option value="">Все оценки AI</option>
+                  <option value="90">AI-Оценка &gt;= 90 🏆</option>
+                  <option value="80">AI-Оценка &gt;= 80 🌟</option>
+                  <option value="50">AI-Оценка &gt;= 50 👍</option>
+                </select>
+              </div>
+            )}
+
             {!lab && <div className="empty-state"><Info size={32} />Сначала создайте лабораторию во вкладке «Лаборатория».</div>}
             {pending.length === 0 && lab && <div className="empty-state"><CheckCircle size={32} />Новых заявок нет.</div>}
             <div className="applications-list">
@@ -673,6 +711,27 @@ export default function DashboardProfessor() {
           <div className="dash-content">
             <h1>{t("nav.interviews")}</h1>
             <p className="dash-subtitle">Управление расписанием собеседований с кандидатами</p>
+
+            <div className="filters-bar" style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap", background: "var(--dash-card)", padding: "14px", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+              <input
+                type="text"
+                placeholder="Поиск по имени, email или мотивации..."
+                value={profSearchQuery}
+                onChange={e => setProfSearchQuery(e.target.value)}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", flex: 1, minWidth: "200px" }}
+              />
+              <select
+                value={profMinAiScore}
+                onChange={e => setProfMinAiScore(e.target.value)}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", outline: "none" }}
+              >
+                <option value="">Все оценки AI</option>
+                <option value="90">AI-Оценка &gt;= 90 🏆</option>
+                <option value="80">AI-Оценка &gt;= 80 🌟</option>
+                <option value="50">AI-Оценка &gt;= 50 👍</option>
+              </select>
+            </div>
+
             {interview.length === 0 ? (
               <div className="empty-state">
                 <Info size={32} />
@@ -714,6 +773,27 @@ export default function DashboardProfessor() {
           <div className="dash-content">
             <h1>Принятые соавторы</h1>
             <p className="dash-subtitle">Список студентов, успешно прошедших отбор</p>
+
+            <div className="filters-bar" style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap", background: "var(--dash-card)", padding: "14px", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+              <input
+                type="text"
+                placeholder="Поиск по имени, email или мотивации..."
+                value={profSearchQuery}
+                onChange={e => setProfSearchQuery(e.target.value)}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", flex: 1, minWidth: "200px" }}
+              />
+              <select
+                value={profMinAiScore}
+                onChange={e => setProfMinAiScore(e.target.value)}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", outline: "none" }}
+              >
+                <option value="">Все оценки AI</option>
+                <option value="90">AI-Оценка &gt;= 90 🏆</option>
+                <option value="80">AI-Оценка &gt;= 80 🌟</option>
+                <option value="50">AI-Оценка &gt;= 50 👍</option>
+              </select>
+            </div>
+
             {accepted.length === 0
               ? <div className="empty-state"><Info size={32} />Принятых студентов пока нет.</div>
               : <div className="applications-list">

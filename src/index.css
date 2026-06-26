@@ -188,3 +188,23 @@ code {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--primary-light);
 }
+
+/* Hide Google Translate Banner and elements */
+.goog-te-banner-frame.skiptranslate,
+.goog-te-banner-frame,
+iframe.goog-te-banner-frame,
+.goog-tooltip,
+.goog-tooltip:hover {
+  display: none !important;
+}
+body {
+  top: 0px !important;
+}
+.goog-text-highlight {
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+#google-translate-container, .skiptranslate {
+  display: none !important;
+}

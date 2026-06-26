@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import "./Landing.css";
+import { useTranslation } from "../context/TranslationContext";
 
 const STATS = [
   { value: "120+", label: "Лабораторий" },
@@ -36,6 +37,7 @@ const STEPS = [
 export default function Landing() {
   const heroRef = useRef(null);
   const [scrollY, setScrollY] = useState(0);
+  const { lang, setLang } = useTranslation();
 
   useEffect(() => {
     const onScroll = () => setScrollY(window.scrollY);
@@ -48,9 +50,41 @@ export default function Landing() {
       {/* NAV */}
       <nav className={`land-nav ${scrollY > 40 ? "land-nav--scrolled" : ""}`}>
         <span className="land-logo">inspirosk</span>
-        <div className="land-nav-links">
-          <Link to="/login" className="land-nav-link">Войти</Link>
-          <Link to="/register/student" className="land-nav-cta">Начать →</Link>
+        <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+          {/* Language selector */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 13 }}>🌐</span>
+            <select 
+              value={lang} 
+              onChange={(e) => setLang(e.target.value)} 
+              className="theme-dropdown"
+              style={{
+                padding: "6px 10px",
+                fontSize: 13,
+                background: "rgba(255, 255, 255, 0.08)",
+                border: "1px solid rgba(255, 255, 255, 0.15)",
+                borderRadius: 8,
+                color: "#fff",
+                cursor: "pointer"
+              }}
+            >
+              <option value="ru" style={{ color: "#000" }}>Русский</option>
+              <option value="en" style={{ color: "#000" }}>English</option>
+              <option value="kk" style={{ color: "#000" }}>Қазақша</option>
+              <option value="es" style={{ color: "#000" }}>Español</option>
+              <option value="fr" style={{ color: "#000" }}>Français</option>
+              <option value="de" style={{ color: "#000" }}>Deutsch</option>
+              <option value="zh-CN" style={{ color: "#000" }}>中文 (简体)</option>
+              <option value="ar" style={{ color: "#000" }}>العربية</option>
+              <option value="tr" style={{ color: "#000" }}>Türkçe</option>
+              <option value="ja" style={{ color: "#000" }}>日本語</option>
+              <option value="ko" style={{ color: "#000" }}>한국어</option>
+            </select>
+          </div>
+          <div className="land-nav-links">
+            <Link to="/login" className="land-nav-link">Войти</Link>
+            <Link to="/register/student" className="land-nav-cta">Начать →</Link>
+          </div>
         </div>
       </nav>
 

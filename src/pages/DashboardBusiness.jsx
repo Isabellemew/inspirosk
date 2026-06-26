@@ -37,6 +37,8 @@ export default function DashboardBusiness() {
   const [showChallengeForm, setShowChallengeForm] = useState(false);
   const [proposingTo, setProposingTo] = useState(null);
   const [proposalText, setProposalText] = useState("");
+  const [bizSearchQuery, setBizSearchQuery] = useState("");
+  const [bizProtoStatus, setBizProtoStatus] = useState("");
 
   // Mobile sidebar state
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -378,43 +380,83 @@ export default function DashboardBusiness() {
             <h1>Рынок прикладных разработок</h1>
             <p className="dash-subtitle">Научные проекты и продукты с коммерческим потенциалом в Казахстане</p>
 
-            {commercialProjects.length === 0 && <div className="empty-state"><Landmark size={32} />Прикладных проектов пока нет.</div>}
-
-            <div className="labs-grid">
-              {commercialProjects.map(proj => {
-                const coop = myCooperations.find(c => c.lab_id === proj.id);
-                return (
-                  <div className="lab-card" key={proj.id} style={{ borderLeft: "4px solid var(--status-pending)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <h3>{proj.name}</h3>
-                      <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)" }}>$ {proj.funding_needed?.toLocaleString() || "Финансирование"}</span>
-                    </div>
-                    <p style={{ fontSize: 13, color: "var(--primary-light)", margin: "4px 0" }}>
-                      👨‍🔬 Автор: {proj.professor_name} {proj.is_independent ? "(Независимый)" : ""}
-                    </p>
-                    <p className="lab-desc">{proj.description}</p>
-                    
-                    <div style={{ background: "var(--input-bg)", padding: 12, borderRadius: 8, margin: "12px 0", fontSize: 13 }}>
-                      <p style={{ margin: "4px 0" }}>🛠 <strong>Статус прототипа:</strong> {proj.prototype_status || "В разработке"}</p>
-                      <p style={{ margin: "4px 0" }}>📊 <strong>Рыночный потенциал:</strong> {proj.market_potential || "Ожидает оценки"}</p>
-                    </div>
-
-                    <div className="lab-tags">
-                      {proj.research_areas?.map(a => <span key={a} className="tag">{a}</span>)}
-                    </div>
-
-                    <div className="lab-footer" style={{ marginTop: 15 }}>
-                      <span>Сделка: доля/контракт</span>
-                      {coop ? (
-                        <span className={`status-badge ${statusClass(coop.status)}`}>{statusLabel(coop.status)}</span>
-                      ) : (
-                        <button className="btn-apply" onClick={() => setProposingTo(proj)}>Связаться / Инвестировать</button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+            {/* Filters Bar */}
+            <div className="filters-bar" style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap", background: "var(--dash-card)", padding: "14px", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+              <input
+                type="text"
+                placeholder="Поиск по названию проекта, ключевым словам или автору..."
+                value={bizSearchQuery}
+                onChange={e => setBizSearchQuery(e.target.value)}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", flex: 1, minWidth: "200px" }}
+              />
+              <select
+                value={bizProtoStatus}
+                onChange={e => setBizProtoStatus(e.target.value)}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", outline: "none" }}
+              >
+                <option value="">Все стадии прототипа</option>
+                <option value="разработ">В разработке 🛠</option>
+                <option value="прототип">Готовый прототип ⚙️</option>
+                <option value="иде">Концепт / Идея 💡</option>
+                <option value="рын">Рыночный продукт 🚀</option>
+              </select>
             </div>
+
+            {(() => {
+              const filteredCommercialProjects = commercialProjects.filter(proj => {
+                const matchesSearch = !bizSearchQuery || 
+                  proj.name?.toLowerCase().includes(bizSearchQuery.toLowerCase()) || 
+                  proj.description?.toLowerCase().includes(bizSearchQuery.toLowerCase()) ||
+                  proj.professor_name?.toLowerCase().includes(bizSearchQuery.toLowerCase());
+                
+                const matchesProto = !bizProtoStatus || 
+                  proj.prototype_status?.toLowerCase().includes(bizProtoStatus.toLowerCase());
+                
+                return matchesSearch && matchesProto;
+              });
+
+              if (filteredCommercialProjects.length === 0) {
+                return <div className="empty-state"><Landmark size={32} />Прикладных проектов не найдено.</div>;
+              }
+
+              return (
+                <div className="labs-grid">
+                  {filteredCommercialProjects.map(proj => {
+                    const coop = myCooperations.find(c => c.lab_id === proj.id);
+                    return (
+                      <div className="lab-card" key={proj.id} style={{ borderLeft: "4px solid var(--status-pending)" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <h3>{proj.name}</h3>
+                          <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)" }}>$ {proj.funding_needed?.toLocaleString() || "Финансирование"}</span>
+                        </div>
+                        <p style={{ fontSize: 13, color: "var(--primary-light)", margin: "4px 0" }}>
+                          👨‍🔬 Автор: {proj.professor_name} {proj.is_independent ? "(Независимый)" : ""}
+                        </p>
+                        <p className="lab-desc">{proj.description}</p>
+                        
+                        <div style={{ background: "var(--input-bg)", padding: 12, borderRadius: 8, margin: "12px 0", fontSize: 13 }}>
+                          <p style={{ margin: "4px 0" }}>🛠 <strong>Статус прототипа:</strong> {proj.prototype_status || "В разработке"}</p>
+                          <p style={{ margin: "4px 0" }}>📊 <strong>Рыночный потенциал:</strong> {proj.market_potential || "Ожидает оценки"}</p>
+                        </div>
+
+                        <div className="lab-tags">
+                          {proj.research_areas?.map(a => <span key={a} className="tag">{a}</span>)}
+                        </div>
+
+                        <div className="lab-footer" style={{ marginTop: 15 }}>
+                          <span>Сделка: доля/контракт</span>
+                          {coop ? (
+                            <span className={`status-badge ${statusClass(coop.status)}`}>{statusLabel(coop.status)}</span>
+                          ) : (
+                            <button className="btn-apply" onClick={() => setProposingTo(proj)}>Связаться / Инвестировать</button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
 

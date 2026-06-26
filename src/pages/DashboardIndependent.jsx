@@ -67,6 +67,8 @@ export default function DashboardIndependent() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterArea, setFilterArea] = useState("");
   const [filterCommercial, setFilterCommercial] = useState(false);
+  const [challengeSearchQuery, setChallengeSearchQuery] = useState("");
+  const [challengeMinBudget, setChallengeMinBudget] = useState("");
 
   const fileInputRef = useRef(null);
   const chatBottomRef = useRef(null);
@@ -512,48 +514,84 @@ export default function DashboardIndependent() {
           <div className="dash-content">
             <h1>Запросы бизнеса (R&D)</h1>
             <p className="dash-subtitle">Научно-прикладные проблемы предприятий Казахстана, требующие решения</p>
-            {businessChallenges.length === 0 ? (
-              <div className="empty-state"><Briefcase size={32} />Запросов от компаний пока нет.</div>
-            ) : (
-              <div className="labs-grid">
-                {businessChallenges.map(ch => (
-                  <div className="lab-card" key={ch.id} style={{ borderLeft: "4px solid var(--status-pending)", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                    <div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <h3>{ch.title}</h3>
-                        <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)" }}>$ {ch.budget?.toLocaleString()}</span>
+
+            <div className="filters-bar" style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap", background: "var(--dash-card)", padding: "14px", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+              <input
+                type="text"
+                placeholder="Поиск по названию, компании или описанию проблемы..."
+                value={challengeSearchQuery}
+                onChange={e => setChallengeSearchQuery(e.target.value)}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", flex: 1, minWidth: "200px" }}
+              />
+              <select
+                value={challengeMinBudget}
+                onChange={e => setChallengeMinBudget(e.target.value)}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", outline: "none" }}
+              >
+                <option value="">Любой бюджет R&D</option>
+                <option value="5000">Грант &gt;= $5,000 💰</option>
+                <option value="10000">Грант &gt;= $10,000 💎</option>
+                <option value="50000">Грант &gt;= $50,000 🚀</option>
+              </select>
+            </div>
+
+            {(() => {
+              const filteredChallenges = businessChallenges.filter(ch => {
+                const matchesSearch = !challengeSearchQuery || 
+                  ch.title?.toLowerCase().includes(challengeSearchQuery.toLowerCase()) || 
+                  ch.description?.toLowerCase().includes(challengeSearchQuery.toLowerCase()) ||
+                  ch.company_name?.toLowerCase().includes(challengeSearchQuery.toLowerCase());
+                
+                const matchesBudget = !challengeMinBudget || (ch.budget !== undefined && ch.budget !== null && Number(ch.budget) >= Number(challengeMinBudget));
+                
+                return matchesSearch && matchesBudget;
+              });
+
+              if (filteredChallenges.length === 0) {
+                return <div className="empty-state"><Briefcase size={32} />Запросов от компаний не найдено.</div>;
+              }
+
+              return (
+                <div className="labs-grid">
+                  {filteredChallenges.map(ch => (
+                    <div className="lab-card" key={ch.id} style={{ borderLeft: "4px solid var(--status-pending)", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                      <div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <h3>{ch.title}</h3>
+                          <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)" }}>$ {ch.budget?.toLocaleString()}</span>
+                        </div>
+                        <p style={{ fontSize: 13, color: "var(--primary-light)", margin: "4px 0" }}>🏢 Компания: {ch.company_name}</p>
+                        <p className="lab-desc">{ch.description}</p>
+                        <div style={{ background: "var(--input-bg)", padding: 10, borderRadius: 8, margin: "10px 0", fontSize: 12 }}>
+                          <p style={{ margin: "2px 0" }}>⏳ <strong>Дедлайн:</strong> {ch.deadline || "Не ограничен"}</p>
+                          <p style={{ margin: "2px 0" }}>🔬 <strong>Направление:</strong> {ch.research_area}</p>
+                        </div>
                       </div>
-                      <p style={{ fontSize: 13, color: "var(--primary-light)", margin: "4px 0" }}>🏢 Компания: {ch.company_name}</p>
-                      <p className="lab-desc">{ch.description}</p>
-                      <div style={{ background: "var(--input-bg)", padding: 10, borderRadius: 8, margin: "10px 0", fontSize: 12 }}>
-                        <p style={{ margin: "2px 0" }}>⏳ <strong>Дедлайн:</strong> {ch.deadline || "Не ограничен"}</p>
-                        <p style={{ margin: "2px 0" }}>🔬 <strong>Направление:</strong> {ch.research_area}</p>
-                      </div>
+                      <button className="btn-apply" onClick={async () => {
+                        const coopData = {
+                          student_id: ch.company_id,
+                          student_name: ch.company_name,
+                          student_email: "",
+                          lab_id: ch.id,
+                          lab_name: `R&D: ${ch.title}`,
+                          professor_id: user.id,
+                          motivation: `Как независимый ученый, я заинтересован в решении вашей R&D задачи: "${ch.title}". Готов обсудить соавторство/контракт.`,
+                          status: "accepted", 
+                          timeline_data: [{ status: "accepted", date: new Date().toLocaleDateString("ru"), note: "Сотрудничество по R&D начато." }]
+                        };
+                        await supabase.from("applications").insert(coopData);
+                        const myProjIds = myProjects.map(p => p.id);
+                        await fetchApps(user.id, myProjIds);
+                        alert("Сотрудничество инициировано! Перейдите во вкладку 'Чат' для связи.");
+                        setActiveTab("chat");
+                      }}>
+                        Предложить решение / Написать
+                      </button>
                     </div>
-                    <button className="btn-apply" onClick={async () => {
-                      const coopData = {
-                        student_id: ch.company_id,
-                        student_name: ch.company_name,
-                        student_email: "",
-                        lab_id: ch.id,
-                        lab_name: `R&D: ${ch.title}`,
-                        professor_id: user.id,
-                        motivation: `Как независимый ученый, я заинтересован в решении вашей R&D задачи: "${ch.title}". Готов обсудить соавторство/контракт.`,
-                        status: "accepted", 
-                        timeline_data: [{ status: "accepted", date: new Date().toLocaleDateString("ru"), note: "Сотрудничество по R&D начато." }]
-                      };
-                      await supabase.from("applications").insert(coopData);
-                      const myProjIds = myProjects.map(p => p.id);
-                      await fetchApps(user.id, myProjIds);
-                      alert("Сотрудничество инициировано! Перейдите во вкладку 'Чат' для связи.");
-                      setActiveTab("chat");
-                    }}>
-                      Предложить решение / Написать
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         )}
 

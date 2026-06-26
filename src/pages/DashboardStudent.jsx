@@ -146,6 +146,10 @@ export default function DashboardStudent() {
   const [filterIntl, setFilterIntl] = useState(false);
   const [filterPrepLevel, setFilterPrepLevel] = useState("");
   const [filterCommercial, setFilterCommercial] = useState(false);
+  const [profMap, setProfMap] = useState({});
+  const [filterFormat, setFilterFormat] = useState("");
+  const [filterLocation, setFilterLocation] = useState("");
+  const [filterUniversity, setFilterUniversity] = useState("");
 
   // Profile Form State
   const [profileForm, setProfileForm] = useState({
@@ -228,6 +232,18 @@ export default function DashboardStudent() {
       // 2. Fetch All Labs
       const { data: labsData } = await supabase.from("labs").select("*");
       setLabs(labsData || []);
+
+      // Fetch professor profiles to map their universities
+      const { data: profProfiles } = await supabase
+        .from("profiles")
+        .select("id, university")
+        .eq("role", "professor");
+      
+      const tempProfMap = {};
+      (profProfiles || []).forEach(p => {
+        tempProfMap[p.id] = p.university || "";
+      });
+      setProfMap(tempProfMap);
 
       // 3. Fetch Applications
       const { data: appsData } = await supabase
@@ -464,13 +480,71 @@ export default function DashboardStudent() {
   // Filter Labs Logic
   const filteredLabs = labs.filter(lab => {
     if (hiddenLabIds.includes(lab.id)) return false;
-    const matchesSearch = lab.name?.toLowerCase().includes(searchQuery.toLowerCase()) || lab.description?.toLowerCase().includes(searchQuery.toLowerCase()) || lab.professor_name?.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesSearch = lab.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      lab.description?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      lab.professor_name?.toLowerCase().includes(searchQuery.toLowerCase());
+      
     const matchesArea = !filterArea || lab.research_areas?.includes(filterArea);
     const matchesNoExp = !filterNoExp || lab.no_experience_ok === true;
     const matchesIntl = !filterIntl || lab.international_ok === true;
     const matchesPrep = !filterPrepLevel || lab.prep_level === filterPrepLevel;
     const matchesComm = !filterCommercial || lab.is_commercial === true;
-    return matchesSearch && matchesArea && matchesNoExp && matchesIntl && matchesPrep && matchesComm;
+
+    // University filtering
+    const profUniversity = profMap[lab.professor_id] || "";
+    const matchesUniv = !filterUniversity || 
+      profUniversity.toLowerCase().includes(filterUniversity.toLowerCase()) || 
+      lab.name?.toLowerCase().includes(filterUniversity.toLowerCase()) || 
+      lab.description?.toLowerCase().includes(filterUniversity.toLowerCase());
+
+    // Format filtering
+    let matchesFormat = true;
+    if (filterFormat === "remote") {
+      matchesFormat = lab.description?.toLowerCase().includes("удален") || 
+        lab.description?.toLowerCase().includes("дистанц") || 
+        lab.description?.toLowerCase().includes("remote") || 
+        lab.description?.toLowerCase().includes("online") || 
+        lab.description?.toLowerCase().includes("онлайн") || 
+        lab.requirements?.toLowerCase().includes("удален") || 
+        lab.requirements?.toLowerCase().includes("remote");
+    } else if (filterFormat === "onsite") {
+      const isRemote = lab.description?.toLowerCase().includes("удален") || 
+        lab.description?.toLowerCase().includes("дистанц") || 
+        lab.description?.toLowerCase().includes("remote") || 
+        lab.description?.toLowerCase().includes("online") || 
+        lab.description?.toLowerCase().includes("онлайн");
+      matchesFormat = !isRemote;
+    } else if (filterFormat === "hybrid") {
+      matchesFormat = lab.description?.toLowerCase().includes("гибрид") || 
+        lab.description?.toLowerCase().includes("hybrid") || 
+        lab.requirements?.toLowerCase().includes("гибрид");
+    }
+
+    // Location/City filtering
+    let matchesLoc = true;
+    const isNuOrAitu = profUniversity.toLowerCase().includes("назарбаев") || 
+      profUniversity.toLowerCase().includes("nu") || 
+      profUniversity.toLowerCase().includes("aitu") || 
+      profUniversity.toLowerCase().includes("ену") || 
+      profUniversity.toLowerCase().includes("евразий");
+    const isAlmatyUniv = profUniversity.toLowerCase().includes("кбту") || 
+      profUniversity.toLowerCase().includes("сатпаев") || 
+      profUniversity.toLowerCase().includes("казну") || 
+      profUniversity.toLowerCase().includes("сду") || 
+      profUniversity.toLowerCase().includes("демирел") ||
+      profUniversity.toLowerCase().includes("нархоз") ||
+      profUniversity.toLowerCase().includes("туран");
+
+    if (filterLocation === "almaty") {
+      matchesLoc = isAlmatyUniv || lab.description?.toLowerCase().includes("алмат") || lab.description?.toLowerCase().includes("almaty");
+    } else if (filterLocation === "astana") {
+      matchesLoc = isNuOrAitu || lab.description?.toLowerCase().includes("астан") || lab.description?.toLowerCase().includes("astana") || lab.description?.toLowerCase().includes("нур-султан");
+    } else if (filterLocation === "remote") {
+      matchesLoc = lab.description?.toLowerCase().includes("удален") || lab.description?.toLowerCase().includes("remote") || lab.description?.toLowerCase().includes("online");
+    }
+
+    return matchesSearch && matchesArea && matchesNoExp && matchesIntl && matchesPrep && matchesComm && matchesUniv && matchesFormat && matchesLoc;
   });
 
   const activeChatApp = chatApps.find(a => a.id === activeChatId);
@@ -608,44 +682,122 @@ export default function DashboardStudent() {
             <p className="dash-subtitle">Найдите научный проект для старта карьеры</p>
             
             {/* Filters Bar */}
-            <div className="filters-bar" style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap", background: "var(--dash-card)", padding: "14px", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
-              <input
-                type="text"
-                placeholder="Поиск по названию или профессору..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", flex: 1, minWidth: "200px" }}
-              />
-              <select
-                value={filterArea}
-                onChange={e => setFilterArea(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)" }}
-              >
-                <option value="">Все направления</option>
-                {RESEARCH_AREAS.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-              <select
-                value={filterPrepLevel}
-                onChange={e => setFilterPrepLevel(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)" }}
-              >
-                <option value="">Любая подготовка</option>
-                <option value="beginner">Начальный уровень</option>
-                <option value="intermediate">Средний уровень</option>
-                <option value="advanced">Продвинутый уровень</option>
-              </select>
-              <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
-                  <input type="checkbox" checked={filterNoExp} onChange={e => setFilterNoExp(e.target.checked)} />
+            <div className="filters-bar" style={{ 
+              display: "grid", 
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", 
+              gap: "14px", 
+              marginBottom: "24px", 
+              background: "var(--dash-card)", 
+              padding: "20px", 
+              borderRadius: "16px", 
+              border: "1px solid var(--border-color)",
+              boxShadow: "0 8px 32px var(--shadow)",
+              backdropFilter: "blur(8px)"
+            }}>
+              <div style={{ gridColumn: "1 / -1", display: "flex", gap: "10px" }}>
+                <input
+                  type="text"
+                  placeholder="Поиск по названию, ключевым словам или профессору..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  style={{ 
+                    padding: "10px 14px", 
+                    borderRadius: "10px", 
+                    border: "1px solid var(--border-color)", 
+                    background: "var(--input-bg)", 
+                    color: "var(--text-primary)", 
+                    width: "100%",
+                    fontSize: "14px",
+                    outline: "none",
+                    transition: "border-color 0.2s"
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 600 }}>Направление</label>
+                <select
+                  value={filterArea}
+                  onChange={e => setFilterArea(e.target.value)}
+                  style={{ padding: "10px 12px", borderRadius: "10px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", fontSize: "13px" }}
+                >
+                  <option value="">Все направления</option>
+                  {RESEARCH_AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 600 }}>Университет / ВУЗ</label>
+                <select
+                  value={filterUniversity}
+                  onChange={e => setFilterUniversity(e.target.value)}
+                  style={{ padding: "10px 12px", borderRadius: "10px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", fontSize: "13px" }}
+                >
+                  <option value="">Все университеты</option>
+                  <option value="Назарбаев">Nazarbayev University</option>
+                  <option value="КБТУ">КБТУ (KBTU)</option>
+                  <option value="Satbayev">Satbayev University</option>
+                  <option value="AITU">AITU (Astana IT)</option>
+                  <option value="ЕНУ">ЕНУ им. Гумилева</option>
+                  <option value="КазНУ">КазНУ им. Аль-Фараби</option>
+                  <option value="СДУ">СДУ (SDU)</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 600 }}>Формат стажировки</label>
+                <select
+                  value={filterFormat}
+                  onChange={e => setFilterFormat(e.target.value)}
+                  style={{ padding: "10px 12px", borderRadius: "10px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", fontSize: "13px" }}
+                >
+                  <option value="">Все форматы</option>
+                  <option value="remote">Удаленный (Remote)</option>
+                  <option value="onsite">Очный (Onsite)</option>
+                  <option value="hybrid">Гибридный (Hybrid)</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 600 }}>Локация / Город</label>
+                <select
+                  value={filterLocation}
+                  onChange={e => setFilterLocation(e.target.value)}
+                  style={{ padding: "10px 12px", borderRadius: "10px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", fontSize: "13px" }}
+                >
+                  <option value="">Все города</option>
+                  <option value="almaty">Алматы (Almaty)</option>
+                  <option value="astana">Астана (Astana)</option>
+                  <option value="remote">Дистанционно</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 600 }}>Подготовка</label>
+                <select
+                  value={filterPrepLevel}
+                  onChange={e => setFilterPrepLevel(e.target.value)}
+                  style={{ padding: "10px 12px", borderRadius: "10px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)", fontSize: "13px" }}
+                >
+                  <option value="">Любая подготовка</option>
+                  <option value="beginner">Начальный уровень</option>
+                  <option value="intermediate">Средний уровень</option>
+                  <option value="advanced">Продвинутый уровень</option>
+                </select>
+              </div>
+
+              <div style={{ gridColumn: "1 / -1", display: "flex", gap: "20px", alignItems: "center", flexWrap: "wrap", borderTop: "1px solid var(--border-color)", paddingTop: "14px", marginTop: "4px" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", color: "var(--text-secondary)" }}>
+                  <input type="checkbox" checked={filterNoExp} onChange={e => setFilterNoExp(e.target.checked)} style={{ width: "16px", height: "16px", cursor: "pointer" }} />
                   Без опыта 👍
                 </label>
-                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
-                  <input type="checkbox" checked={filterIntl} onChange={e => setFilterIntl(e.target.checked)} />
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", color: "var(--text-secondary)" }}>
+                  <input type="checkbox" checked={filterIntl} onChange={e => setFilterIntl(e.target.checked)} style={{ width: "16px", height: "16px", cursor: "pointer" }} />
                   Ин. студенты 🌍
                 </label>
-                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
-                  <input type="checkbox" checked={filterCommercial} onChange={e => setFilterCommercial(e.target.checked)} />
-                  Коммерческие 💰
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", color: "var(--text-secondary)" }}>
+                  <input type="checkbox" checked={filterCommercial} onChange={e => setFilterCommercial(e.target.checked)} style={{ width: "16px", height: "16px", cursor: "pointer" }} />
+                  Прикладные / Paid 💰
                 </label>
               </div>
             </div>

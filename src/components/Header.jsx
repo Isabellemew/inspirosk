@@ -168,6 +168,14 @@ export default function Header({ userProfile, onOpenSettings }) {
             <option value="ru">Русский</option>
             <option value="en">English</option>
             <option value="kk">Қазақша</option>
+            <option value="es">Español</option>
+            <option value="fr">Français</option>
+            <option value="de">Deutsch</option>
+            <option value="zh-CN">中文 (简体)</option>
+            <option value="ar">العربية</option>
+            <option value="tr">Türkçe</option>
+            <option value="ja">日本語</option>
+            <option value="ko">한국어</option>
           </select>
         </div>
 
