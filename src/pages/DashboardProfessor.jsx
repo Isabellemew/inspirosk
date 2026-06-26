@@ -1,18 +1,15 @@
 import { useState, useEffect, useRef } from "react";
-import { auth, db } from "../firebase.js";
-import { signOut } from "firebase/auth";
-import {
-  doc, getDoc, collection, getDocs, query, where,
-  addDoc, updateDoc, serverTimestamp, orderBy, onSnapshot
-} from "firebase/firestore";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { supabase } from "../supabaseClient.js";
 import { useNavigate } from "react-router-dom";
 import {
   MessageSquare, Send, Paperclip, Mic, Download,
   Image as ImageIcon, LogOut, CheckCircle, Clock, FileText,
-  Info, Upload, Palette, Briefcase
+  Info, Upload, Palette, Briefcase, Video, Star, ShieldAlert
 } from "lucide-react";
 import "./Dashboard.css";
+import { useTranslation } from "../context/TranslationContext";
+import Header from "../components/Header.jsx";
+import InterviewBar from "../components/InterviewBar.jsx";
 
 // ── CUSTOM AUDIO PLAYER COMPONENT ──
 function AudioPlayer({ src, duration }) {
@@ -106,6 +103,18 @@ function AudioPlayer({ src, duration }) {
 }
 
 export default function DashboardProfessor() {
+  const { t } = useTranslation();
+
+  useEffect(() => {
+    window.onStartVideoCall = (url) => {
+      setJoiningVideoRoom(url);
+    };
+    return () => {
+      window.onStartVideoCall = null;
+    };
+  }, []);
+
+  const [user, setUser] = useState(null);
   const [userData, setUserData] = useState(null);
   const [lab, setLab] = useState(null);
   const [applications, setApplications] = useState([]);
@@ -120,6 +129,14 @@ export default function DashboardProfessor() {
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSent, setFeedbackSent] = useState(false);
   const [businessChallenges, setBusinessChallenges] = useState([]);
+
+  // AI scoring states
+  const [scoringAppId, setScoringAppId] = useState(null);
+  // Video room creation states
+  const [videoGeneratingAppId, setVideoGeneratingAppId] = useState(null);
+  const [joiningVideoRoom, setJoiningVideoRoom] = useState(null);
+  // Mobile sidebar state
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Lab and Profile Form states
   const [labForm, setLabForm] = useState({
@@ -140,20 +157,25 @@ export default function DashboardProfessor() {
     localStorage.getItem("inspiro-theme") || "cosmic-dark"
   );
 
-  // Lightbox & Voice recorder States
+  // Lightbox States
   const [activeImageUrl, setActiveImageUrl] = useState(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingDuration, setRecordingDuration] = useState(0);
-
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const recordingTimerRef = useRef(null);
 
   const fileInputRef = useRef(null);
   const imageAttachInputRef = useRef(null);
   const fileAttachInputRef = useRef(null);
   const chatBottomRef = useRef(null);
   const navigate = useNavigate();
+
+  const getWarnings = () => {
+    if (!userData?.bio) return [];
+    try {
+      if (userData.bio.startsWith("{") && userData.bio.endsWith("}")) {
+        const parsed = JSON.parse(userData.bio);
+        return parsed.warnings || [];
+      }
+    } catch (e) {}
+    return [];
+  };
 
   const RESEARCH_AREAS = [
     "Machine Learning", "Data Science", "Robotics", "NLP", "Computer Vision",
@@ -169,103 +191,125 @@ export default function DashboardProfessor() {
     { id: "sunset-glow", name: "🌅 Sunset Glow" },
   ];
 
+  const fetchApps = async (userId) => {
+    const { data: appsData } = await supabase
+      .from("applications")
+      .select("*")
+      .eq("professor_id", userId);
+    setApplications(appsData || []);
+  };
+
   // Fetch initial profile, labs, applications
   useEffect(() => {
     const fetchData = async () => {
-      const user = auth.currentUser;
-      if (!user) return;
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) return navigate("/login");
+      setUser(currentUser);
 
       // 1. Fetch User Data
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      if (userDoc.exists()) {
-        const data = userDoc.data();
-        setUserData(data);
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", currentUser.id)
+        .single();
+
+      if (profile) {
+        setUserData(profile);
         setProfileForm({
-          name: data.name || "",
-          university: data.university || "",
-          department: data.department || "",
-          position: data.position || "",
-          bio: data.bio || "",
-          website: data.website || "",
-          googleScholar: data.googleScholar || "",
-          linkedin: data.linkedin || "",
-          researchgate: data.researchgate || "",
-          achievements: data.achievements || "",
-          papers: data.papers || ""
+          name: profile.name || "",
+          university: profile.university || "",
+          department: profile.department || "",
+          position: profile.position || "",
+          bio: profile.bio || "",
+          website: profile.website || "",
+          googleScholar: profile.googleScholar || "",
+          linkedin: profile.linkedin || "",
+          researchgate: profile.researchgate || "",
+          achievements: profile.achievements || "",
+          papers: profile.papers || ""
         });
       }
 
       // 2. Fetch Lab Data
-      const labSnap = await getDocs(
-        query(collection(db, "labs"), where("professorId", "==", user.uid))
-      );
+      const { data: labsData } = await supabase
+        .from("labs")
+        .select("*")
+        .eq("professor_id", currentUser.id);
 
-      if (!labSnap.empty) {
-        const labData = { id: labSnap.docs[0].id, ...labSnap.docs[0].data() };
+      if (labsData && labsData.length > 0) {
+        const labData = labsData[0];
         setLab(labData);
         setLabForm({
           name: labData.name || "",
           description: labData.description || "",
-          researchAreas: labData.researchAreas || [],
-          openSpots: labData.openSpots || 3,
+          researchAreas: labData.research_areas || [],
+          openSpots: labData.open_spots || 3,
           requirements: labData.requirements || "",
           responsibilities: labData.responsibilities || "",
           benefits: labData.benefits || "",
           papers: labData.papers || "",
-          noExperienceOk: !!labData.noExperienceOk,
-          prepLevel: labData.prepLevel || "beginner",
-          internationalOk: !!labData.internationalOk,
+          noExperienceOk: !!labData.no_experience_ok,
+          prepLevel: labData.prep_level || "beginner",
+          internationalOk: !!labData.international_ok,
           challenges: labData.challenges || "",
-          howToApply: labData.howToApply || "",
-          isCommercial: !!labData.isCommercial,
-          fundingNeeded: labData.fundingNeeded || "",
-          prototypeStatus: labData.prototypeStatus || "",
-          marketPotential: labData.marketPotential || ""
+          howToApply: labData.how_to_apply || "",
+          isCommercial: !!labData.is_commercial,
+          fundingNeeded: labData.funding_needed || "",
+          prototypeStatus: labData.prototype_status || "",
+          marketPotential: labData.market_potential || ""
         });
-
-        // Fetch Applications for this professor
-        const appsSnap = await getDocs(
-          query(collection(db, "applications"), where("professorId", "==", user.uid))
-        );
-        const apps = appsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setApplications(apps);
       }
 
-      // Fetch Business Challenges
-      const bcSnap = await getDocs(collection(db, "business_challenges"));
-      setBusinessChallenges(bcSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // 3. Fetch applications
+      await fetchApps(currentUser.id);
+
+      // 4. Fetch Business Challenges
+      const { data: challenges } = await supabase.from("business_challenges").select("*");
+      setBusinessChallenges(challenges || []);
 
       setLoading(false);
     };
 
     fetchData();
-  }, []);
+  }, [navigate]);
+
+  // Fetch Messages helper
+  const fetchMessages = async (appId) => {
+    const { data: msgs } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("application_id", appId)
+      .order("created_at", { ascending: true });
+    
+    setChats(prev => ({
+      ...prev,
+      [appId]: msgs || []
+    }));
+    setTimeout(() => {
+      chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 80);
+  };
 
   // REAL-TIME Chat Listener for selected activeChatId
   useEffect(() => {
     if (!activeChatId) return;
 
-    const q = query(
-      collection(db, "chats", activeChatId, "messages"),
-      orderBy("createdAt", "asc")
-    );
+    fetchMessages(activeChatId);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map(d => ({
-        id: d.id,
-        ...d.data()
-      }));
-      setChats(prev => ({
-        ...prev,
-        [activeChatId]: msgs
-      }));
-      // Scroll to bottom
-      setTimeout(() => {
-        chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 80);
-    });
+    const subscription = supabase
+      .channel(`chat_${activeChatId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "messages", filter: `application_id=eq.${activeChatId}` },
+        () => {
+          fetchMessages(activeChatId);
+        }
+      )
+      .subscribe();
 
-    return () => unsubscribe();
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [activeChatId]);
 
   // Theme changer
@@ -280,74 +324,152 @@ export default function DashboardProfessor() {
     if (!file) return;
     setAvatarUploading(true);
     try {
-      const storage = getStorage();
-      const storageRef = ref(storage, `avatars/${auth.currentUser.uid}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      await updateDoc(doc(db, "users", auth.currentUser.uid), { avatarUrl: url });
-      setUserData(prev => ({ ...prev, avatarUrl: url }));
-    } catch {
-      alert("Ошибка загрузки фото. Проверь Firebase Storage правила.");
+      const fileName = `${user.id}_${Date.now()}.png`;
+      const { error: uploadErr } = await supabase.storage
+        .from("avatars")
+        .upload(fileName, file);
+
+      if (uploadErr) throw uploadErr;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("avatars")
+        .getPublicUrl(fileName);
+
+      await supabase.from("profiles").update({ avatar_url: publicUrl }).eq("id", user.id);
+      setUserData(prev => ({ ...prev, avatar_url: publicUrl }));
+    } catch (err) {
+      alert("Ошибка загрузки фото: " + err.message);
     }
     setAvatarUploading(false);
   };
 
   const handleSaveProfile = async () => {
-    await updateDoc(doc(db, "users", auth.currentUser.uid), { ...profileForm });
+    await supabase.from("profiles").update({ ...profileForm }).eq("id", user.id);
     setUserData(prev => ({ ...prev, ...profileForm }));
     setEditingProfile(false);
   };
 
   const handleCreateLab = async () => {
-    const user = auth.currentUser;
+    const warnings = getWarnings();
+    if (warnings.some(w => w.level === "ban")) {
+      alert("Вы заблокированы администратором и не можете редактировать лабораторию.");
+      return;
+    }
     const labData = {
-      ...labForm,
-      professorId: user.uid,
-      professorName: userData?.name || user.email,
-      openSpots: Number(labForm.openSpots),
-      noExperienceOk: !!labForm.noExperienceOk,
-      prepLevel: labForm.prepLevel || "beginner",
-      internationalOk: !!labForm.internationalOk,
+      name: labForm.name,
+      description: labForm.description,
+      research_areas: labForm.researchAreas,
+      open_spots: Number(labForm.openSpots),
+      requirements: labForm.requirements || "",
+      responsibilities: labForm.responsibilities || "",
+      benefits: labForm.benefits || "",
+      papers: labForm.papers || "",
+      no_experience_ok: !!labForm.noExperienceOk,
+      prep_level: labForm.prepLevel || "beginner",
+      international_ok: !!labForm.internationalOk,
       challenges: labForm.challenges || "",
-      howToApply: labForm.howToApply || "",
-      isCommercial: !!labForm.isCommercial,
-      fundingNeeded: labForm.isCommercial ? Number(labForm.fundingNeeded || 0) : 0,
-      prototypeStatus: labForm.isCommercial ? labForm.prototypeStatus || "" : "",
-      marketPotential: labForm.isCommercial ? labForm.marketPotential || "" : "",
-      createdAt: serverTimestamp(),
+      how_to_apply: labForm.howToApply || "",
+      is_commercial: !!labForm.isCommercial,
+      funding_needed: labForm.isCommercial ? Number(labForm.fundingNeeded || 0) : 0,
+      prototype_status: labForm.isCommercial ? labForm.prototypeStatus || "" : "",
+      market_potential: labForm.isCommercial ? labForm.marketPotential || "" : "",
+      professor_id: user.id,
+      professor_name: userData?.name || user.email,
     };
 
     if (lab?.id) {
-      await updateDoc(doc(db, "labs", lab.id), labData);
+      await supabase.from("labs").update(labData).eq("id", lab.id);
       setLab({ id: lab.id, ...labData });
     } else {
-      const newLab = await addDoc(collection(db, "labs"), labData);
-      setLab({ id: newLab.id, ...labData });
+      const { data: newLabRes } = await supabase.from("labs").insert(labData).select().single();
+      if (newLabRes) setLab(newLabRes);
     }
     setShowLabForm(false);
   };
 
   const handleStatus = async (appId, status) => {
-    await updateDoc(doc(db, "applications", appId), { status });
-    setApplications(prev => prev.map(a => a.id === appId ? { ...a, status } : a));
+    const warnings = getWarnings();
+    if (warnings.some(w => w.level === "ban")) {
+      alert("Вы заблокированы администратором и не можете совершать действия с заявками.");
+      return;
+    }
+    const matchedApp = applications.find(a => a.id === appId);
+    if (!matchedApp) return;
+
+    const timeline = matchedApp.timeline_data || [];
+    const notes = {
+      accepted: "Принят в лабораторию. Поздравляем!",
+      rejected: "К сожалению, ваша кандидатура отклонена.",
+      interview: "Руководитель пригласил вас на видео-собеседование."
+    };
+    
+    const updatedTimeline = [
+      ...timeline,
+      { status, date: new Date().toLocaleDateString("ru"), note: notes[status] || "Статус обновлен" }
+    ];
+
+    await supabase.from("applications").update({ status, timeline_data: updatedTimeline }).eq("id", appId);
+    await fetchApps(user.id);
+  };
+
+  // Daily.co Video Room trigger
+  const handleGenerateVideoRoom = async (appId) => {
+    setVideoGeneratingAppId(appId);
+    try {
+      const res = await fetch("http://localhost:8000/api/create-video-room", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ application_id: appId })
+      });
+      const data = await res.json();
+      if (data.room_url) {
+        alert("Видео-комната успешно создана!");
+        await fetchApps(user.id);
+      } else {
+        alert("Не удалось создать видео-комнату.");
+      }
+    } catch {
+      alert("Ошибка подключения к backend на http://localhost:8000. Запустите Python сервер.");
+    }
+    setVideoGeneratingAppId(null);
+  };
+
+  // AI applicant score trigger
+  const handleScoreApplication = async (appId) => {
+    setScoringAppId(appId);
+    try {
+      const res = await fetch("http://localhost:8000/api/score-application", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ application_id: appId })
+      });
+      const data = await res.json();
+      if (data.status === "success") {
+        alert(`Оценка кандидата завершена! Балл: ${data.score}/100`);
+        await fetchApps(user.id);
+      } else {
+        alert("Не удалось рассчитать балл.");
+      }
+    } catch {
+      alert("Ошибка подключения к backend на http://localhost:8000. Запустите Python сервер.");
+    }
+    setScoringAppId(null);
   };
 
   const handleSendMessage = async (appId) => {
     if (!chatMessage.trim()) return;
-    const user = auth.currentUser;
     const textToSend = chatMessage;
-    setChatMessage(""); // Clear input early
+    setChatMessage("");
 
-    await addDoc(collection(db, "chats", appId, "messages"), {
+    await supabase.from("messages").insert({
+      application_id: appId,
       text: textToSend,
-      senderId: user.uid,
-      senderName: userData?.name || "Профессор",
-      senderRole: "professor",
-      createdAt: serverTimestamp(),
+      sender_id: user.id,
+      sender_name: userData?.name || "Профессор",
+      sender_role: "professor",
     });
   };
 
-  // Upload Files / Photos to Storage
   const handleAttachUpload = async (e, type) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -357,118 +479,44 @@ export default function DashboardProfessor() {
     }
 
     try {
-      const storage = getStorage();
-      const storageRef = ref(storage, `chats/${activeChatId}/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
+      const fileName = `${activeChatId}/${Date.now()}_${file.name}`;
+      const { error: uploadErr } = await supabase.storage
+        .from("chats")
+        .upload(fileName, file);
 
-      await addDoc(collection(db, "chats", activeChatId, "messages"), {
+      if (uploadErr) throw uploadErr;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("chats")
+        .getPublicUrl(fileName);
+
+      await supabase.from("messages").insert({
+        application_id: activeChatId,
         text: type === "image" ? "" : file.name,
-        fileUrl: url,
-        fileName: file.name,
-        fileType: type,
-        senderId: auth.currentUser.uid,
-        senderName: userData?.name || "Профессор",
-        senderRole: "professor",
-        createdAt: serverTimestamp(),
+        file_url: publicUrl,
+        file_name: file.name,
+        file_type: type,
+        sender_id: user.id,
+        sender_name: userData?.name || "Профессор",
+        sender_role: "professor",
       });
-    } catch {
-      alert("Не удалось отправить файл. Проверьте подключение.");
-    }
-  };
-
-  // AUDIO RECORDING FUNCTIONS
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        await uploadAudioMessage(audioBlob);
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-      setRecordingDuration(0);
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingDuration(prev => prev + 1);
-      }, 1000);
-    } catch {
-      alert("Не удалось получить доступ к микрофону");
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      clearInterval(recordingTimerRef.current);
-    }
-  };
-
-  const cancelRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.onstop = () => {
-        const stream = mediaRecorderRef.current.stream;
-        if (stream) {
-          stream.getTracks().forEach(track => track.stop());
-        }
-      };
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      clearInterval(recordingTimerRef.current);
-      setRecordingDuration(0);
-    }
-  };
-
-  const uploadAudioMessage = async (blob) => {
-    try {
-      const storage = getStorage();
-      const fileName = `voice_${Date.now()}.webm`;
-      const storageRef = ref(storage, `chats/${activeChatId}/${fileName}`);
-      await uploadBytes(storageRef, blob);
-      const url = await getDownloadURL(storageRef);
-
-      await addDoc(collection(db, "chats", activeChatId, "messages"), {
-        text: "",
-        fileUrl: url,
-        fileName: fileName,
-        fileType: "audio",
-        audioDuration: recordingDuration,
-        senderId: auth.currentUser.uid,
-        senderName: userData?.name || "Профессор",
-        senderRole: "professor",
-        createdAt: serverTimestamp(),
-      });
-    } catch {
-      alert("Ошибка сохранения голосового сообщения.");
+    } catch (err) {
+      alert("Не удалось отправить файл: " + err.message);
     }
   };
 
   const handleSendFeedback = async () => {
     if (!feedbackText.trim()) return;
-    await addDoc(collection(db, "feedback"), {
+    await supabase.from("feedback").insert({
       text: feedbackText,
-      userId: auth.currentUser.uid,
-      userRole: "professor",
-      userName: userData?.name || "",
-      createdAt: serverTimestamp(),
+      user_id: user.id,
+      user_role: "professor",
+      user_name: userData?.name || "",
     });
     setFeedbackText("");
     setFeedbackSent(true);
   };
 
-  // Helper to jump to a student's chat from dashboard lists
   const handleJumpToChat = (appId) => {
     setActiveTab("chat");
     setActiveChatId(appId);
@@ -478,22 +526,31 @@ export default function DashboardProfessor() {
   const interview = applications.filter(a => a.status === "interview");
   const accepted = applications.filter(a => a.status === "accepted");
   const chatApps = applications.filter(a => a.status === "accepted" || a.status === "interview");
-
   const initials = userData?.name?.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() || "P";
+
   const activeChatApp = chatApps.find(a => a.id === activeChatId);
 
   if (loading) return <div className="dash-loading">Загрузка...</div>;
 
   return (
     <div className="dashboard">
+      
+      {/* ── MOBILE HEADER ── */}
+      <header className="mobile-header" style={{ display: "none" }}>
+        <button className="menu-toggle-btn" onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}>
+          ☰ Меню
+        </button>
+        <span className="land-logo" style={{ fontSize: 18, fontWeight: "bold" }}>inspirosk</span>
+      </header>
+
       {/* ── SIDEBAR ── */}
-      <aside className="dash-sidebar">
+      <aside className={`dash-sidebar ${mobileSidebarOpen ? "mobile-open" : ""}`}>
         <div className="dash-logo">inspirosk</div>
 
         <div className="dash-user">
-          <div className="dash-avatar professor-avatar" style={userData?.avatarUrl ? { padding: 0, overflow: "hidden" } : {}}>
-            {userData?.avatarUrl
-              ? <img src={userData.avatarUrl} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <div className="dash-avatar professor-avatar" style={userData?.avatar_url ? { padding: 0, overflow: "hidden" } : {}}>
+            {userData?.avatar_url
+              ? <img src={userData.avatar_url} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               : initials}
           </div>
           <div>
@@ -521,20 +578,43 @@ export default function DashboardProfessor() {
             ["profile", "👤 Профиль", 0],
             ["support", "🛠 Поддержка", 0],
           ].map(([tab, label, count]) => (
-            <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
+            <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => { setActiveTab(tab); setMobileSidebarOpen(false); }}>
               {label}
               {count > 0 && <span className="badge">{count}</span>}
             </button>
           ))}
         </nav>
 
-        <button className="dash-logout" onClick={() => { signOut(auth); navigate("/login"); }}>
+        <button className="dash-logout" onClick={() => { supabase.auth.signOut(); navigate("/login"); }}>
           <LogOut size={16} /> Выйти
         </button>
       </aside>
 
       {/* ── MAIN CONTENT ── */}
       <main className="dash-main">
+        <Header userProfile={userData} onOpenSettings={() => setActiveTab("profile")} />
+
+        {getWarnings().map((w, idx) => (
+          <div key={idx} style={{ 
+            margin: "16px 32px 0 32px", 
+            padding: "12px 18px", 
+            borderRadius: 12, 
+            background: w.level === "ban" ? "rgba(239,68,68,0.15)" : w.level === "warning" ? "rgba(245,158,11,0.15)" : "rgba(59,130,246,0.15)",
+            border: `1px solid ${w.level === "ban" ? "var(--status-rejected)" : w.level === "warning" ? "var(--status-pending)" : "var(--primary)"}`,
+            color: "var(--text-primary)",
+            display: "flex",
+            alignItems: "center",
+            gap: 12
+          }}>
+            <ShieldAlert size={20} style={{ color: w.level === "ban" ? "var(--status-rejected)" : w.level === "warning" ? "var(--status-pending)" : "var(--primary)", flexShrink: 0 }} />
+            <div>
+              <strong style={{ textTransform: "uppercase", fontSize: 12, display: "block" }}>
+                Системное предупреждение: {w.level === "ban" ? "БАН" : w.level === "warning" ? "ПРЕДУПРЕЖДЕНИЕ" : "ИНФО"}
+              </strong>
+              <span style={{ fontSize: 13 }}>{w.text}</span>
+            </div>
+          </div>
+        ))}
 
         {/* ── ЗАЯВКИ ── */}
         {activeTab === "applications" && (
@@ -545,17 +625,39 @@ export default function DashboardProfessor() {
             {pending.length === 0 && lab && <div className="empty-state"><CheckCircle size={32} />Новых заявок нет.</div>}
             <div className="applications-list">
               {pending.map(app => (
-                <div className="app-card app-card-full" key={app.id}>
-                  <div className="app-info">
-                    <h3>{app.studentName}</h3>
-                    <p className="app-email">{app.studentEmail}</p>
-                    <p className="app-motivation">«{app.motivation}»</p>
-                    {app.cvUrl && (
-                      <a href={app.cvUrl} target="_blank" rel="noreferrer" className="cv-link">📄 Резюме (CV)</a>
-                    )}
-                    <p className="app-date"><Clock size={12} /> {app.createdAt?.toDate?.().toLocaleDateString("ru")}</p>
+                <div className="app-card app-card-full" key={app.id} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div className="app-info">
+                      <h3 style={{ margin: 0 }}>{app.student_name}</h3>
+                      <p className="app-email" style={{ margin: "2px 0 0 0" }}>{app.student_email}</p>
+                      <p className="app-motivation" style={{ marginTop: 10 }}>«{app.motivation}»</p>
+                      {app.cv_url && (
+                        <a href={app.cv_url} target="_blank" rel="noreferrer" className="cv-link">📄 Резюме (CV)</a>
+                      )}
+                      <p className="app-date" style={{ marginTop: 6 }}><Clock size={12} /> {new Date(app.created_at).toLocaleDateString("ru")}</p>
+                    </div>
+
+                    {/* AI Scoring Area on card */}
+                    <div style={{ background: "var(--input-bg)", padding: 12, borderRadius: 10, maxWidth: 260, border: "1px solid var(--border-color)" }}>
+                      {app.ai_score ? (
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: "bold" }}>
+                            <span>🤖 AI-Оценка:</span>
+                            <span style={{ color: app.ai_score >= 80 ? "var(--status-accepted)" : app.ai_score >= 50 ? "var(--status-pending)" : "var(--status-rejected)" }}>
+                              {app.ai_score} / 100
+                            </span>
+                          </div>
+                          <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6, lineHeight: 1.3 }}>{app.ai_feedback}</p>
+                        </div>
+                      ) : (
+                        <button className="btn-secondary" style={{ width: "100%", fontSize: 11 }} onClick={() => handleScoreApplication(app.id)} disabled={scoringAppId === app.id}>
+                          🤖 {scoringAppId === app.id ? "Оцениваем..." : "Оценить по AI"}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="app-actions">
+
+                  <div className="app-actions" style={{ display: "flex", gap: 10, borderTop: "1px solid var(--border-color)", paddingTop: 10 }}>
                     <button className="btn-accept" onClick={() => handleStatus(app.id, "accepted")}>✓ Принять</button>
                     <button className="btn-interview" onClick={() => handleStatus(app.id, "interview")}>🎯 Интервью</button>
                     <button className="btn-reject" onClick={() => handleStatus(app.id, "rejected")}>✗ Отклонить</button>
@@ -569,22 +671,61 @@ export default function DashboardProfessor() {
         {/* ── ИНТЕРВЬЮ ── */}
         {activeTab === "interview" && (
           <div className="dash-content">
-            <h1>На стадии интервью</h1>
-            <p className="dash-subtitle">Собеседование и отбор подходящих кандидатов</p>
-            {interview.length === 0
-              ? <div className="empty-state"><Info size={32} />Никого на стадии интервью.</div>
+            <h1>{t("nav.interviews")}</h1>
+            <p className="dash-subtitle">Управление расписанием собеседований с кандидатами</p>
+            {interview.length === 0 ? (
+              <div className="empty-state">
+                <Info size={32} />
+                Никого на стадии интервью.
+              </div>
+            ) : (
+              <div className="labs-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))" }}>
+                {interview.map(app => (
+                  <div className="lab-card" key={app.id} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div>
+                      <h3 style={{ margin: "0 0 4px 0" }}>{app.student_name}</h3>
+                      <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)" }}>{app.student_email}</p>
+                    </div>
+
+                    <div style={{ borderTop: "1px solid var(--border-color)", paddingTop: 14 }}>
+                      <InterviewBar 
+                        application={app} 
+                        currentUserRole="professor" 
+                        onUpdate={async () => fetchApps(user.id)} 
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, borderTop: "1px solid var(--border-color)", paddingTop: 14 }}>
+                      <button className="btn-accept" style={{ padding: "6px 12px", fontSize: 12, flex: 1 }} onClick={() => handleStatus(app.id, "accepted")}>✓ Принять</button>
+                      <button className="btn-reject" style={{ padding: "6px 12px", fontSize: 12, flex: 1 }} onClick={() => handleStatus(app.id, "rejected")}>✗ Отклонить</button>
+                      <button className="btn-secondary" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => handleJumpToChat(app.id)}>
+                        <MessageSquare size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── СТУДЕНТЫ ── */}
+        {activeTab === "students" && (
+          <div className="dash-content">
+            <h1>Принятые соавторы</h1>
+            <p className="dash-subtitle">Список студентов, успешно прошедших отбор</p>
+            {accepted.length === 0
+              ? <div className="empty-state"><Info size={32} />Принятых студентов пока нет.</div>
               : <div className="applications-list">
-                  {interview.map(app => (
+                  {accepted.map(app => (
                     <div className="app-card app-card-full" key={app.id}>
                       <div className="app-info">
-                        <h3>{app.studentName}</h3>
-                        <p className="app-email">{app.studentEmail}</p>
+                        <h3>{app.student_name}</h3>
+                        <p className="app-email">{app.student_email}</p>
                       </div>
                       <div className="app-actions">
-                        <button className="btn-accept" onClick={() => handleStatus(app.id, "accepted")}>✓ Принять</button>
-                        <button className="btn-reject" onClick={() => handleStatus(app.id, "rejected")}>✗ Отклонить</button>
                         <button className="btn-secondary" onClick={() => handleJumpToChat(app.id)}>
-                          <MessageSquare size={14} /> Чат
+                          <MessageSquare size={14} style={{ marginRight: 4 }} /> Написать в чат
                         </button>
                       </div>
                     </div>
@@ -594,199 +735,60 @@ export default function DashboardProfessor() {
           </div>
         )}
 
-        {/* ── СТУДЕНТЫ ── */}
-        {activeTab === "students" && (
-          <div className="dash-content">
-            <h1>Мои студенты</h1>
-            <p className="dash-subtitle">Студенты, которые уже работают в вашей лаборатории</p>
-            {accepted.length === 0
-              ? <div className="empty-state"><Info size={32} />Пока нет принятых студентов.</div>
-              : <div className="students-grid">
-                  {accepted.map(app => (
-                    <div className="student-card" key={app.id} onClick={() => handleJumpToChat(app.id)}>
-                      <div className="student-card-avatar">{app.studentName?.[0] || "S"}</div>
-                      <h3>{app.studentName}</h3>
-                      <p>{app.studentEmail}</p>
-                      <span className="status-badge status-accepted" style={{ marginTop: 8 }}>В лаборатории</span>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6, textDecoration: "underline" }}>Открыть чат 💬</div>
-                    </div>
-                  ))}
-                </div>
-            }
-          </div>
-        )}
-
-        {/* ── RICH CHAT ── */}
+        {/* ── ЧАТ ── */}
         {activeTab === "chat" && (
-          <div className="dash-content">
-            <h1>Сообщения</h1>
-            <p className="dash-subtitle">Обсуждайте исследования и задачи напрямую</p>
-            {chatApps.length === 0
-              ? <div className="empty-state"><MessageSquare size={32} />Чат доступен после принятия студента или отправки на интервью.</div>
-              : <div className="chat-layout">
-                  {/* Chat list */}
-                  <div className="chat-list">
-                    {chatApps.map(app => {
-                      const lastMsgs = chats[app.id] || [];
-                      const lastMsg = lastMsgs[lastMsgs.length - 1];
-                      let previewText = "Сообщений нет";
-                      if (lastMsg) {
-                        if (lastMsg.fileType === "image") previewText = "📷 Фотография";
-                        else if (lastMsg.fileType === "audio") previewText = "🎤 Голосовое сообщение";
-                        else if (lastMsg.fileType === "file") previewText = `📄 ${lastMsg.fileName}`;
-                        else previewText = lastMsg.text;
-                      }
+          <div className="dash-content chat-tab-container" style={{ height: "calc(100vh - 120px)" }}>
+            <h1>Чат обсуждения</h1>
+            <div className="chat-window-layout" style={{ display: "flex", height: "90%", border: "1px solid var(--border-color)", borderRadius: 12, overflow: "hidden", background: "var(--dash-sidebar)" }}>
+              {/* Chat sidebar */}
+              <div className="chat-list-sidebar" style={{ width: 250, borderRight: "1px solid var(--border-color)" }}>
+                {chatApps.length === 0 ? (
+                  <p style={{ padding: 15, fontSize: 12, color: "var(--text-muted)" }}>Нет активных чатов.</p>
+                ) : (
+                  chatApps.map(app => (
+                    <div key={app.id} className={`chat-item-node ${activeChatId === app.id ? "active-node" : ""}`} onClick={() => setActiveChatId(app.id)} style={{ padding: 12, cursor: "pointer", borderBottom: "1px solid var(--border-color)", background: activeChatId === app.id ? "var(--primary-glow)" : "transparent" }}>
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13 }}>{app.lab_name}</p>
+                      <p style={{ margin: "2px 0 0 0", fontSize: 11, color: "var(--text-muted)" }}>{app.student_name}</p>
+                    </div>
+                  ))
+                )}
+              </div>
 
-                      return (
-                        <div
-                          key={app.id}
-                          className={`chat-person ${activeChatId === app.id ? "active" : ""}`}
-                          onClick={() => setActiveChatId(app.id)}
-                        >
-                          <div className="student-avatar">{app.studentName?.[0]}</div>
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ fontWeight: 600, fontSize: 13, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>{app.studentName}</div>
-                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                              {app.status === "interview" ? "🎯 Интервью" : "✓ Принят"}
-                            </div>
-                            <div style={{ fontSize: 11, color: "var(--text-secondary)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap", marginTop: 4 }}>
-                              {previewText}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Chat Window Panel */}
-                  <div className="chat-window">
-                    {!activeChatId
-                      ? <div className="empty-state"><MessageSquare size={32} />Выберите студента слева для начала общения</div>
-                      : <>
-                          {/* Chat Header */}
-                          <div className="chat-header">
-                            <div className="chat-header-user">
-                              <div className="student-avatar" style={{ width: 34, height: 34, fontSize: 12 }}>{activeChatApp?.studentName?.[0]}</div>
-                              <div>
-                                <div className="chat-header-name">{activeChatApp?.studentName}</div>
-                                <div className="chat-header-sub">{activeChatApp?.studentEmail}</div>
+              {/* Chat messages */}
+              <div className="chat-main-window" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+                {activeChatId && activeChatApp ? (
+                  <>
+                    <div className="chat-header" style={{ padding: 12, borderBottom: "1px solid var(--border-color)", background: "var(--dash-card)" }}>
+                      <h4 style={{ margin: 0 }}>{activeChatApp.lab_name}</h4>
+                      <p style={{ margin: 0, fontSize: 11, color: "var(--text-muted)" }}>Диалог со студентом: {activeChatApp.student_name}</p>
+                    </div>
+                    <div className="chat-messages-container" style={{ flex: 1, padding: 15, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+                      {(chats[activeChatId] || []).map(msg => {
+                        const isMe = msg.sender_id === user.id;
+                        return (
+                          <div key={msg.id} style={{ alignSelf: isMe ? "flex-end" : "flex-start", background: isMe ? "var(--primary)" : "var(--dash-card)", padding: "10px 14px", borderRadius: 12, maxWidth: "60%" }}>
+                            <p style={{ margin: 0, fontSize: 11, fontWeight: "bold", color: isMe ? "#fff" : "var(--primary-light)" }}>{msg.sender_name}</p>
+                            <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "#fff" }}>{msg.text}</p>
+                            {msg.file_url && (
+                              <div style={{ marginTop: 5 }}>
+                                <a href={msg.file_url} target="_blank" rel="noreferrer" style={{ color: "#00ffcc", fontSize: 12, textDecoration: "underline" }}>📄 Открыть вложение</a>
                               </div>
-                            </div>
-                          </div>
-
-                          {/* Chat Messages scroll area */}
-                          <div className="chat-messages">
-                            {(chats[activeChatId] || []).map((msg, i) => {
-                              const isMine = msg.senderRole === "professor";
-                              return (
-                                <div key={msg.id || i} className={`chat-bubble ${isMine ? "mine" : "theirs"}`}>
-                                  {/* Render Image type */}
-                                  {msg.fileType === "image" && msg.fileUrl && (
-                                    <img
-                                      src={msg.fileUrl}
-                                      alt="attachment"
-                                      className="chat-image-preview"
-                                      onClick={() => setActiveImageUrl(msg.fileUrl)}
-                                    />
-                                  )}
-
-                                  {/* Render Document/File type */}
-                                  {msg.fileType === "file" && msg.fileUrl && (
-                                    <div className="chat-file-card">
-                                      <div className="chat-file-icon">
-                                        <FileText size={16} />
-                                      </div>
-                                      <div className="chat-file-info">
-                                        <div className="chat-file-name">{msg.fileName}</div>
-                                      </div>
-                                      <a href={msg.fileUrl} target="_blank" rel="noreferrer" className="chat-file-download">
-                                        <Download size={16} />
-                                      </a>
-                                    </div>
-                                  )}
-
-                                  {/* Render Audio type */}
-                                  {msg.fileType === "audio" && msg.fileUrl && (
-                                    <AudioPlayer src={msg.fileUrl} duration={msg.audioDuration} />
-                                  )}
-
-                                  {/* Text Content */}
-                                  {msg.text && <span>{msg.text}</span>}
-
-                                  <span className="chat-time">
-                                    {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                            <div ref={chatBottomRef} />
-                          </div>
-
-                          {/* Bottom input area */}
-                          <div className="chat-input-row">
-                            {/* Hidden file pickers */}
-                            <input
-                              type="file"
-                              ref={imageAttachInputRef}
-                              accept="image/*"
-                              style={{ display: "none" }}
-                              onChange={(e) => handleAttachUpload(e, "image")}
-                            />
-                            <input
-                              type="file"
-                              ref={fileAttachInputRef}
-                              accept="*"
-                              style={{ display: "none" }}
-                              onChange={(e) => handleAttachUpload(e, "file")}
-                            />
-
-                            {/* Attach menu buttons */}
-                            <button className="chat-attach-btn" onClick={() => imageAttachInputRef.current.click()} title="Прикрепить фото">
-                              <ImageIcon size={20} />
-                            </button>
-                            <button className="chat-attach-btn" onClick={() => fileAttachInputRef.current.click()} title="Прикрепить файл">
-                              <Paperclip size={20} />
-                            </button>
-
-                            {/* Voice Recorder Indicator / Text Input */}
-                            {isRecording ? (
-                              <div className="voice-recorder-bar">
-                                <div>
-                                  <span className="voice-pulser" />
-                                  Запись голосового: {recordingDuration}с
-                                </div>
-                                <button className="voice-cancel-btn" onClick={cancelRecording}>Отмена</button>
-                              </div>
-                            ) : (
-                              <input
-                                className="chat-text-input"
-                                value={chatMessage}
-                                onChange={e => setChatMessage(e.target.value)}
-                                onKeyDown={e => e.key === "Enter" && handleSendMessage(activeChatId)}
-                                placeholder="Написать сообщение..."
-                              />
-                            )}
-
-                            {/* Mic/Send button toggles */}
-                            {chatMessage.trim() ? (
-                              <button className="chat-send-btn" onClick={() => handleSendMessage(activeChatId)}>
-                                <Send size={16} />
-                              </button>
-                            ) : (
-                              <button
-                                className={`chat-mic-btn ${isRecording ? "recording" : ""}`}
-                                onClick={isRecording ? stopRecording : startRecording}
-                                title={isRecording ? "Отправить голосовое" : "Записать голосовое"}
-                              >
-                                {isRecording ? <Send size={16} /> : <Mic size={20} />}
-                              </button>
                             )}
                           </div>
-                        </>
-                    }
-                  </div>
-                </div>
-            }
+                        );
+                      })}
+                      <div ref={chatBottomRef} />
+                    </div>
+                    <div className="chat-input-row" style={{ padding: 12, display: "flex", gap: 8, background: "var(--dash-card)" }}>
+                      <input type="text" placeholder="Введите сообщение..." value={chatMessage} onChange={e => setChatMessage(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSendMessage(activeChatId)} style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "#fff" }} />
+                      <button className="btn-apply" onClick={() => handleSendMessage(activeChatId)} style={{ padding: "10px 15px" }}><Send size={16} /></button>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}>Выберите переписку для начала общения</div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -805,28 +807,28 @@ export default function DashboardProfessor() {
                 
                 <hr style={{ borderColor: "var(--border-color)", margin: "8px 0" }} />
                 <h3 style={{ margin: 0, color: "var(--primary-light)" }}>Прозрачность для студентов</h3>
-                <div className="profile-row"><span>Без опыта:</span> <span>{lab.noExperienceOk ? "Да 👍" : "Нет"}</span></div>
-                <div className="profile-row"><span>Уровень подготовки:</span> <span>{lab.prepLevel === "beginner" ? "Начальный" : lab.prepLevel === "intermediate" ? "Средний" : "Продвинутый"}</span></div>
-                <div className="profile-row"><span>Иностранные студенты:</span> <span>{lab.internationalOk ? "Да 🌍" : "Нет"}</span></div>
+                <div className="profile-row"><span>Без опыта:</span> <span>{lab.no_experience_ok ? "Да 👍" : "Нет"}</span></div>
+                <div className="profile-row"><span>Уровень подготовки:</span> <span>{lab.prep_level === "beginner" ? "Начальный" : lab.prep_level === "intermediate" ? "Средний" : "Продвинутый"}</span></div>
+                <div className="profile-row"><span>Иностранные студенты:</span> <span>{lab.international_ok ? "Да 🌍" : "Нет"}</span></div>
                 <div className="profile-row"><span>Сложности/Вызовы:</span> <span>{lab.challenges || "—"}</span></div>
-                <div className="profile-row"><span>Инструкция по подаче:</span> <span>{lab.howToApply || "—"}</span></div>
+                <div className="profile-row"><span>Инструкция по подаче:</span> <span>{lab.how_to_apply || "—"}</span></div>
 
                 <hr style={{ borderColor: "var(--border-color)", margin: "8px 0" }} />
                 <h3 style={{ margin: 0, color: "var(--status-pending)" }}>Коммерциализация и бизнес</h3>
-                <div className="profile-row"><span>Статус продукта:</span> <span>{lab.isCommercial ? "Прикладной коммерческий продукт 💰" : "Академическое исследование"}</span></div>
-                {lab.isCommercial && (
+                <div className="profile-row"><span>Статус продукта:</span> <span>{lab.is_commercial ? "Прикладной коммерческий продукт 💰" : "Академическое исследование"}</span></div>
+                {lab.is_commercial && (
                   <>
-                    <div className="profile-row"><span>Финансирование ($):</span> <span>{lab.fundingNeeded?.toLocaleString() || "—"}</span></div>
-                    <div className="profile-row"><span>Статус прототипа:</span> <span>{lab.prototypeStatus || "—"}</span></div>
-                    <div className="profile-row"><span>Рыночный потенциал:</span> <span>{lab.marketPotential || "—"}</span></div>
+                    <div className="profile-row"><span>Финансирование ($):</span> <span>{lab.funding_needed?.toLocaleString() || "—"}</span></div>
+                    <div className="profile-row"><span>Статус прототипа:</span> <span>{lab.prototype_status || "—"}</span></div>
+                    <div className="profile-row"><span>Рыночный потенциал:</span> <span>{lab.market_potential || "—"}</span></div>
                   </>
                 )}
 
                 <div className="profile-row" style={{ marginTop: 12 }}>
                   <span>Направления:</span>
-                  <div className="lab-tags">{lab.researchAreas?.map(a => <span key={a} className="tag">{a}</span>)}</div>
+                  <div className="lab-tags">{lab.research_areas?.map(a => <span key={a} className="tag">{a}</span>)}</div>
                 </div>
-                <div className="profile-row"><span>Мест всего:</span> <span>{lab.openSpots}</span></div>
+                <div className="profile-row"><span>Мест всего:</span> <span>{lab.open_spots}</span></div>
                 {lab.papers && <div className="profile-row"><span>Публикации:</span> <span>{lab.papers}</span></div>}
                 
                 <button className="btn-apply" style={{ marginTop: 16, width: "max-content" }} onClick={() => setShowLabForm(true)}>✏️ Редактировать лабораторию</button>
@@ -856,33 +858,26 @@ export default function DashboardProfessor() {
                       <h3>{ch.title}</h3>
                       <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)" }}>$ {ch.budget?.toLocaleString()}</span>
                     </div>
-                    <p style={{ fontSize: 13, color: "var(--primary-light)", margin: "4px 0" }}>🏢 Компания: {ch.companyName}</p>
+                    <p style={{ fontSize: 13, color: "var(--primary-light)", margin: "4px 0" }}>🏢 Компания: {ch.company_name}</p>
                     <p className="lab-desc">{ch.description}</p>
                     <div style={{ background: "var(--input-bg)", padding: 10, borderRadius: 8, margin: "10px 0", fontSize: 12 }}>
                       <p style={{ margin: "2px 0" }}>⏳ <strong>Дедлайн:</strong> {ch.deadline || "Не ограничен"}</p>
-                      <p style={{ margin: "2px 0" }}>🔬 <strong>Направление:</strong> {ch.researchArea}</p>
+                      <p style={{ margin: "2px 0" }}>🔬 <strong>Направление:</strong> {ch.research_area}</p>
                     </div>
                     <button className="btn-apply" onClick={async () => {
-                      const user = auth.currentUser;
                       const coopData = {
-                        studentId: ch.companyId,
-                        studentName: ch.companyName,
-                        studentEmail: "",
-                        labId: ch.id,
-                        labName: `R&D: ${ch.title}`,
-                        professorId: user.uid,
+                        student_id: ch.company_id,
+                        student_name: ch.company_name,
+                        student_email: "",
+                        lab_id: ch.id,
+                        lab_name: `R&D: ${ch.title}`,
+                        professor_id: user.id,
                         motivation: `Наша лаборатория заинтересована в решении вашего R&D запроса: "${ch.title}". Готовы обсудить сотрудничество.`,
                         status: "accepted", // Accepted immediately so chat is active
-                        createdAt: serverTimestamp(),
+                        timeline_data: [{ status: "accepted", date: new Date().toLocaleDateString("ru"), note: "Сотрудничество по R&D начато." }]
                       };
-                      await addDoc(collection(db, "applications"), coopData);
-                      
-                      // Refresh applications
-                      const appsSnap = await getDocs(
-                        query(collection(db, "applications"), where("professorId", "==", user.uid))
-                      );
-                      setApplications(appsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-                      
+                      await supabase.from("applications").insert(coopData);
+                      await fetchApps(user.id);
                       alert("Диалог начат! Перейдите во вкладку 'Чат' для связи.");
                       setActiveTab("chat");
                     }}>
@@ -900,11 +895,11 @@ export default function DashboardProfessor() {
           <div className="dash-content">
             <h1>Мой профиль</h1>
             <p className="dash-subtitle">Управление личной информацией исследователя</p>
-            <div className="profile-card" style={{ flexDirection: "column", alignItems: "flex-start", gap: 24 }}>
+            <div className="profile-card" style={{ flexDirection: "column", alignItems: "flex-start", gap: 24, padding: 24 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-                <div className="profile-avatar professor-avatar" style={userData?.avatarUrl ? { padding: 0, overflow: "hidden", width: 80, height: 80 } : { width: 80, height: 80, fontSize: 32 }}>
-                  {userData?.avatarUrl
-                    ? <img src={userData.avatarUrl} alt="avatar" />
+                <div className="profile-avatar professor-avatar" style={userData?.avatar_url ? { padding: 0, overflow: "hidden", width: 80, height: 80 } : { width: 80, height: 80, fontSize: 32 }}>
+                  {userData?.avatar_url
+                    ? <img src={userData.avatar_url} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                     : initials}
                 </div>
                 <div>
@@ -927,23 +922,11 @@ export default function DashboardProfessor() {
                     ["linkedin", "LinkedIn", "ссылка"],
                     ["researchgate", "ResearchGate", "ссылка"],
                   ].map(([field, label, ph]) => (
-                    <div className="profile-edit-row" key={field}>
-                      <label>{label}</label>
-                      <input value={profileForm[field]} onChange={e => setProfileForm(p => ({ ...p, [field]: e.target.value }))} placeholder={ph} />
+                    <div className="profile-edit-row" key={field} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <label style={{ fontSize: 13, fontWeight: "bold" }}>{label}</label>
+                      <input style={{ padding: "8px 12px", background: "var(--input-bg)", border: "1px solid var(--border-color)", color: "#fff", borderRadius: 8 }} value={profileForm[field]} onChange={e => setProfileForm(p => ({ ...p, [field]: e.target.value }))} placeholder={ph} />
                     </div>
                   ))}
-                  <div className="profile-edit-row">
-                    <label>О себе</label>
-                    <textarea rows={3} value={profileForm.bio} onChange={e => setProfileForm(p => ({ ...p, bio: e.target.value }))} placeholder="Кратко о ваших исследованиях..." />
-                  </div>
-                  <div className="profile-edit-row">
-                    <label>Достижения</label>
-                    <textarea rows={3} value={profileForm.achievements} onChange={e => setProfileForm(p => ({ ...p, achievements: e.target.value }))} placeholder="Гранты, награды..." />
-                  </div>
-                  <div className="profile-edit-row">
-                    <label>Исследовательские работы (ссылки)</label>
-                    <textarea rows={2} value={profileForm.papers} onChange={e => setProfileForm(p => ({ ...p, papers: e.target.value }))} placeholder="https://doi.org/..." />
-                  </div>
                   <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
                     <button className="btn-apply" onClick={handleSaveProfile}>Сохранить</button>
                     <button className="btn-secondary" onClick={() => setEditingProfile(false)}>Отмена</button>
@@ -953,13 +936,10 @@ export default function DashboardProfessor() {
                 <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
                   {[
                     ["Имя", userData?.name],
-                    ["Email", auth.currentUser?.email],
+                    ["Email", user?.email],
                     ["Должность", userData?.position],
                     ["Кафедра", userData?.department],
                     ["Университет", userData?.university],
-                    ["О себе", userData?.bio],
-                    ["Достижения", userData?.achievements],
-                    ["Публикации", userData?.papers],
                     ["Сайт", userData?.website],
                     ["Google Scholar", userData?.googleScholar],
                     ["LinkedIn", userData?.linkedin],
@@ -1003,6 +983,24 @@ export default function DashboardProfessor() {
         <div className="lightbox-overlay" onClick={() => setActiveImageUrl(null)}>
           <button className="lightbox-close" onClick={() => setActiveImageUrl(null)}>×</button>
           <img src={activeImageUrl} alt="Fullscreen Attachment" className="lightbox-img" onClick={e => e.stopPropagation()} />
+        </div>
+      )}
+
+      {/* ── Daily.co Video Interview Iframe Modal ── */}
+      {joiningVideoRoom && (
+        <div className="modal-overlay" onClick={() => setJoiningVideoRoom(null)}>
+          <div className="modal" style={{ maxWidth: 800, width: "95%", height: "600px", padding: 20 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-color)", paddingBottom: 10, marginBottom: 15 }}>
+              <h3 style={{ margin: 0 }}>🎥 Видео-интервью Daily.co</h3>
+              <button className="btn-secondary" onClick={() => setJoiningVideoRoom(null)} style={{ padding: "4px 8px" }}>Выйти</button>
+            </div>
+            <iframe 
+              title="Видео-интервью Daily.co"
+              src={joiningVideoRoom} 
+              allow="camera; microphone; fullscreen; display-capture; autoplay" 
+              style={{ width: "100%", height: "480px", border: "none", borderRadius: 12 }} 
+            />
+          </div>
         </div>
       )}
 

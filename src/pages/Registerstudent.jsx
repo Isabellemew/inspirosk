@@ -1,9 +1,10 @@
-import { useState } from "react";
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
-import { auth, db } from "../firebase";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import "./Auth.css";
+import { supabase } from "../supabaseClient.js";
+import { useTranslation } from "../context/TranslationContext";
+import AvatarCropper from "../components/AvatarCropper.jsx";
+import { Camera } from "lucide-react";
 
 const RESEARCH_AREAS = [
   "Machine Learning", "Биоинформатика", "Материаловедение",
@@ -11,13 +12,19 @@ const RESEARCH_AREAS = [
 ];
 
 export default function RegisterStudent() {
+  const { lang, setLang, t } = useTranslation();
+  const navigate = useNavigate();
+
+  const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     name: "", email: "", password: "", university: "",
     degree: "bachelor", year: "1", interests: [],
   });
+
+  const [passwordError, setPasswordError] = useState("");
+  const [avatarDataUrl, setAvatarDataUrl] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
 
@@ -30,13 +37,96 @@ export default function RegisterStudent() {
     }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  // Real-time password validator
+  useEffect(() => {
+    if (!form.password) {
+      setPasswordError("");
+      return;
+    }
+    const hasLetter = /[a-zA-Zа-яА-Я]/.test(form.password);
+    const hasDigit = /[0-9]/.test(form.password);
+    const hasMinLength = form.password.length >= 8;
+
+    if (!hasMinLength || !hasLetter || !hasDigit) {
+      setPasswordError(t("auth.password_hint"));
+    } else {
+      setPasswordError("");
+    }
+  }, [form.password, t]);
+
+  // Generate fallback initials canvas
+  const generateInitialsAvatar = (name) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 200;
+    canvas.height = 200;
+    const ctx = canvas.getContext("2d");
+    
+    // Choose beautiful HSL color based on name length
+    const hue = (name.length * 37) % 360;
+    ctx.fillStyle = `hsl(${hue}, 60%, 45%)`;
+    ctx.fillRect(0, 0, 200, 200);
+
+    // Get initials
+    const parts = name.trim().split(" ");
+    let initials = "";
+    if (parts.length > 0 && parts[0]) initials += parts[0][0].toUpperCase();
+    if (parts.length > 1 && parts[1]) initials += parts[1][0].toUpperCase();
+    if (!initials) initials = "S";
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 80px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(initials, 100, 100);
+
+    return canvas.toDataURL("image/png");
+  };
+
+  // Next Step validation checker
+  const isStepValid = () => {
+    if (step === 1) {
+      return (
+        form.name.trim() !== "" &&
+        form.email.trim() !== "" &&
+        form.password.trim() !== "" &&
+        passwordError === ""
+      );
+    }
+    if (step === 2) {
+      return (
+        form.university.trim() !== "" &&
+        form.degree !== "" &&
+        form.year !== "" &&
+        form.interests.length > 0
+      );
+    }
+    return true;
+  };
+
+  const handleNext = () => {
+    if (isStepValid()) {
+      setStep((s) => s + 1);
+    }
+  };
+
+  const handleBack = () => {
+    setStep((s) => Math.max(1, s - 1));
+  };
+
+  const handleSubmit = async () => {
     setError("");
     setLoading(true);
     try {
-      const { user } = await createUserWithEmailAndPassword(auth, form.email, form.password);
-      await setDoc(doc(db, "users", user.uid), {
+      const finalAvatar = avatarDataUrl || generateInitialsAvatar(form.name);
+
+      const { data: { user }, error: authErr } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+      });
+      if (authErr) throw authErr;
+      
+      const { error: dbErr } = await supabase.from("profiles").insert({
+        id: user.id,
         role: "student",
         name: form.name,
         email: form.email,
@@ -44,17 +134,13 @@ export default function RegisterStudent() {
         degree: form.degree,
         year: form.year,
         interests: form.interests,
-        createdAt: new Date(),
+        avatar_url: finalAvatar,
       });
+      if (dbErr) throw dbErr;
+
       navigate("/dashboardStudent");
     } catch (err) {
-      if (err.code === "auth/email-already-in-use") {
-        setError("Этот email уже зарегистрирован");
-      } else if (err.code === "auth/weak-password") {
-        setError("Пароль должен быть не менее 6 символов");
-      } else {
-        setError("Ошибка регистрации. Попробуй ещё раз.");
-      }
+      setError(err.message || "Ошибка регистрации. Попробуй ещё раз.");
     } finally {
       setLoading(false);
     }
@@ -63,80 +149,147 @@ export default function RegisterStudent() {
   return (
     <div className="auth-page">
       <div className="auth-card wide">
-        <div className="auth-logo">
-          <span className="logo-text">inspirosk</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div className="auth-logo">
+            <span className="logo-text">inspirosk</span>
+          </div>
+          <select value={lang} onChange={(e) => setLang(e.target.value)} className="role-select" style={{ width: "auto", margin: 0, padding: "4px 8px" }}>
+            <option value="ru">RU</option>
+            <option value="en">EN</option>
+            <option value="kk">KK</option>
+          </select>
         </div>
 
         <div className="role-badge student">Студент</div>
-        <h1 className="auth-title">Создай профиль</h1>
-        <p className="auth-subtitle">Найди лабораторию, которая подходит именно тебе</p>
+        <h1 className="auth-title">{t("register.student_title")}</h1>
+        
+        {/* Step Indicator */}
+        <div style={{ display: "flex", justifyContent: "space-between", margin: "16px 0 24px 0", background: "var(--input-bg)", padding: "8px 16px", borderRadius: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: step === 1 ? "bold" : "normal", color: step === 1 ? "var(--primary)" : "var(--text-muted)" }}>1. {t("auth.step_personal")}</span>
+          <span style={{ fontSize: 13, fontWeight: step === 2 ? "bold" : "normal", color: step === 2 ? "var(--primary)" : "var(--text-muted)" }}>2. {t("auth.step_details")}</span>
+          <span style={{ fontSize: 13, fontWeight: step === 3 ? "bold" : "normal", color: step === 3 ? "var(--primary)" : "var(--text-muted)" }}>3. {t("auth.step_avatar")}</span>
+        </div>
 
-        <form onSubmit={handleSubmit} className="auth-form">
-          <div className="fields-row">
-            <div className="field-group">
-              <label>Полное имя</label>
-              <input value={form.name} onChange={update("name")} placeholder="Алия Нурланова" required />
+        <div className="auth-form">
+          {/* STEP 1: Personal credentials */}
+          {step === 1 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div className="field-group">
+                <label>{t("register.name")} *</label>
+                <input value={form.name} onChange={update("name")} placeholder="Имя Фамилия" required />
+              </div>
+              <div className="field-group">
+                <label>{t("register.email")} *</label>
+                <input type="email" value={form.email} onChange={update("email")} placeholder="you@university.edu" required />
+              </div>
+              <div className="field-group">
+                <label>Пароль *</label>
+                <input type="password" value={form.password} onChange={update("password")} placeholder="••••••••" required />
+                {passwordError && <p className="auth-error-inline" style={{ color: "var(--status-rejected)", fontSize: 12, marginTop: 4 }}>{passwordError}</p>}
+              </div>
             </div>
-            <div className="field-group">
-              <label>Email университета</label>
-              <input type="email" value={form.email} onChange={update("email")} placeholder="a.nurlanova@nu.edu.kz" required />
+          )}
+
+          {/* STEP 2: Profile Details */}
+          {step === 2 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div className="field-group">
+                <label>{t("register.university")} *</label>
+                <input value={form.university} onChange={update("university")} placeholder="Назарбаев Университет" required />
+              </div>
+
+              <div className="fields-row">
+                <div className="field-group">
+                  <label>{t("register.degree")} *</label>
+                  <select value={form.degree} onChange={update("degree")}>
+                    <option value="bachelor">Бакалавриат</option>
+                    <option value="master">Магистратура</option>
+                    <option value="phd">PhD</option>
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label>{t("register.year")} *</label>
+                  <select value={form.year} onChange={update("year")}>
+                    {["1","2","3","4"].map((y) => (
+                      <option key={y} value={y}>{y} курс</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="field-group">
+                <label>{t("register.interests")} * <span className="optional">({t("common.optional")})</span></label>
+                <div className="chips">
+                  {RESEARCH_AREAS.map((area) => (
+                    <button
+                      key={area}
+                      type="button"
+                      className={`chip ${form.interests.includes(area) ? "active" : ""}`}
+                      onClick={() => toggleInterest(area)}
+                    >
+                      {area}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="field-group">
-            <label>Университет</label>
-            <input value={form.university} onChange={update("university")} placeholder="Назарбаев Университет" required />
-          </div>
-
-          <div className="fields-row">
-            <div className="field-group">
-              <label>Степень</label>
-              <select value={form.degree} onChange={update("degree")}>
-                <option value="bachelor">Бакалавриат</option>
-                <option value="master">Магистратура</option>
-                <option value="phd">PhD</option>
-              </select>
+          {/* STEP 3: Avatar Upload & Crop */}
+          {step === 3 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {avatarDataUrl ? (
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ position: "relative", display: "inline-block", width: 120, height: 120 }}>
+                    <img 
+                      src={avatarDataUrl} 
+                      alt="Avatar Preview" 
+                      style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover", border: "3px solid var(--primary)" }} 
+                    />
+                    <button 
+                      type="button"
+                      className="btn-secondary" 
+                      style={{ position: "absolute", bottom: 0, right: 0, borderRadius: "50%", padding: 6 }} 
+                      onClick={() => setAvatarDataUrl(null)}
+                    >
+                      <Camera size={14} />
+                    </button>
+                  </div>
+                  <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8 }}>Фото профиля успешно настроено!</p>
+                </div>
+              ) : (
+                <AvatarCropper 
+                  onCropComplete={(croppedData) => setAvatarDataUrl(croppedData)} 
+                  onCancel={() => setAvatarDataUrl(null)} 
+                />
+              )}
             </div>
-            <div className="field-group">
-              <label>Курс</label>
-              <select value={form.year} onChange={update("year")}>
-                {["1","2","3","4"].map((y) => (
-                  <option key={y} value={y}>{y} курс</option>
-                ))}
-              </select>
-            </div>
+          )}
+
+          {error && <p className="auth-error" style={{ marginTop: 12 }}>{error}</p>}
+
+          {/* Navigation Controls */}
+          <div style={{ display: "flex", justifycontent: "space-between", gap: 12, marginTop: 24 }}>
+            {step > 1 && (
+              <button type="button" className="btn-secondary" onClick={handleBack} style={{ flex: 1 }}>
+                {t("common.prev")}
+              </button>
+            )}
+            
+            {step < 3 ? (
+              <button type="button" className="auth-btn" onClick={handleNext} disabled={!isStepValid()} style={{ flex: 2 }}>
+                {t("common.next")}
+              </button>
+            ) : (
+              <button type="button" className="auth-btn" onClick={handleSubmit} disabled={loading} style={{ flex: 2, background: "var(--primary)" }}>
+                {loading ? t("common.loading") : t("auth.register")}
+              </button>
+            )}
           </div>
+        </div>
 
-          <div className="field-group">
-            <label>Области интересов <span className="optional">(выбери несколько)</span></label>
-            <div className="chips">
-              {RESEARCH_AREAS.map((area) => (
-                <button
-                  key={area}
-                  type="button"
-                  className={`chip ${form.interests.includes(area) ? "active" : ""}`}
-                  onClick={() => toggleInterest(area)}
-                >
-                  {area}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="field-group">
-            <label>Пароль</label>
-            <input type="password" value={form.password} onChange={update("password")} placeholder="Минимум 6 символов" required />
-          </div>
-
-          {error && <p className="auth-error">{error}</p>}
-
-          <button type="submit" className="auth-btn" disabled={loading}>
-            {loading ? "Создаём аккаунт..." : "Зарегистрироваться как студент"}
-          </button>
-        </form>
-
-        <div className="auth-links">
-          <p>Уже есть аккаунт? <Link to="/login">Войти</Link></p>
+        <div className="auth-links" style={{ marginTop: 20 }}>
+          <p>{t("auth.has_account")} <Link to="/login">{t("common.submit")}</Link></p>
           <p>Вы профессор? <Link to="/register/professor">Регистрация для лабораторий</Link></p>
         </div>
       </div>

@@ -1,9 +1,10 @@
-import { useState } from "react";
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
-import { auth, db } from "../firebase";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import "./Auth.css";
+import { supabase } from "../supabaseClient.js";
+import { useTranslation } from "../context/TranslationContext";
+import AvatarCropper from "../components/AvatarCropper.jsx";
+import { Camera } from "lucide-react";
 
 const INDUSTRIES = [
   "IT & AI", "Биотехнологии & Медицина", "Энергетика & Зеленые технологии",
@@ -12,13 +13,19 @@ const INDUSTRIES = [
 ];
 
 export default function RegisterBusiness() {
+  const { lang, setLang, t } = useTranslation();
+  const navigate = useNavigate();
+
+  const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     companyName: "", name: "", email: "", password: "",
     position: "", description: "", industry: [],
   });
+
+  const [passwordError, setPasswordError] = useState("");
+  const [avatarDataUrl, setAvatarDataUrl] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
 
@@ -31,31 +38,108 @@ export default function RegisterBusiness() {
     }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  // Real-time password validator
+  useEffect(() => {
+    if (!form.password) {
+      setPasswordError("");
+      return;
+    }
+    const hasLetter = /[a-zA-Zа-яА-Я]/.test(form.password);
+    const hasDigit = /[0-9]/.test(form.password);
+    const hasMinLength = form.password.length >= 8;
+
+    if (!hasMinLength || !hasLetter || !hasDigit) {
+      setPasswordError(t("auth.password_hint"));
+    } else {
+      setPasswordError("");
+    }
+  }, [form.password, t]);
+
+  // Generate fallback initials canvas
+  const generateInitialsAvatar = (name) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 200;
+    canvas.height = 200;
+    const ctx = canvas.getContext("2d");
+    
+    const hue = (name.length * 97) % 360;
+    ctx.fillStyle = `hsl(${hue}, 60%, 45%)`;
+    ctx.fillRect(0, 0, 200, 200);
+
+    const parts = name.trim().split(" ");
+    let initials = "";
+    if (parts.length > 0 && parts[0]) initials += parts[0][0].toUpperCase();
+    if (parts.length > 1 && parts[1]) initials += parts[1][0].toUpperCase();
+    if (!initials) initials = "B";
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 80px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(initials, 100, 100);
+
+    return canvas.toDataURL("image/png");
+  };
+
+  // Check step validation status
+  const isStepValid = () => {
+    if (step === 1) {
+      return (
+        form.companyName.trim() !== "" &&
+        form.name.trim() !== "" &&
+        form.email.trim() !== "" &&
+        form.password.trim() !== "" &&
+        passwordError === ""
+      );
+    }
+    if (step === 2) {
+      return (
+        form.position.trim() !== "" &&
+        form.description.trim() !== "" &&
+        form.industry.length > 0
+      );
+    }
+    return true;
+  };
+
+  const handleNext = () => {
+    if (isStepValid()) {
+      setStep((s) => s + 1);
+    }
+  };
+
+  const handleBack = () => {
+    setStep((s) => Math.max(1, s - 1));
+  };
+
+  const handleSubmit = async () => {
     setError("");
     setLoading(true);
     try {
-      const { user } = await createUserWithEmailAndPassword(auth, form.email, form.password);
-      await setDoc(doc(db, "users", user.uid), {
+      const finalAvatar = avatarDataUrl || generateInitialsAvatar(form.name);
+
+      const { data: { user }, error: authErr } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+      });
+      if (authErr) throw authErr;
+      
+      const { error: dbErr } = await supabase.from("profiles").insert({
+        id: user.id,
         role: "business",
-        companyName: form.companyName,
+        company_name: form.companyName,
         name: form.name,
         email: form.email,
         position: form.position,
-        description: form.description,
+        bio: form.description, // Store in bio so general queries work
         industry: form.industry,
-        createdAt: new Date(),
+        avatar_url: finalAvatar,
       });
+      if (dbErr) throw dbErr;
+
       navigate("/dashboardBusiness");
     } catch (err) {
-      if (err.code === "auth/email-already-in-use") {
-        setError("Этот email уже зарегистрирован");
-      } else if (err.code === "auth/weak-password") {
-        setError("Пароль должен быть не менее 6 символов");
-      } else {
-        setError("Ошибка регистрации. Попробуй ещё раз.");
-      }
+      setError(err.message || "Ошибка регистрации. Попробуй ещё раз.");
     } finally {
       setLoading(false);
     }
@@ -64,80 +148,145 @@ export default function RegisterBusiness() {
   return (
     <div className="auth-page">
       <div className="auth-card wide">
-        <div className="auth-logo">
-          <span className="logo-text">inspirosk</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div className="auth-logo">
+            <span className="logo-text">inspirosk</span>
+          </div>
+          <select value={lang} onChange={(e) => setLang(e.target.value)} className="role-select" style={{ width: "auto", margin: 0, padding: "4px 8px" }}>
+            <option value="ru">RU</option>
+            <option value="en">EN</option>
+            <option value="kk">KK</option>
+          </select>
         </div>
 
         <div className="role-badge business" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)", border: "1px solid var(--status-pending)" }}>
           Бизнес / Инвестор
         </div>
-        <h1 className="auth-title">Создай бизнес-профиль</h1>
-        <p className="auth-subtitle">Находите прикладные научные проекты и инвестируйте в инновации</p>
+        <h1 className="auth-title">{t("register.business_title")}</h1>
 
-        <form onSubmit={handleSubmit} className="auth-form">
-          <div className="fields-row">
-            <div className="field-group">
-              <label>Название компании / Фонда</label>
-              <input value={form.companyName} onChange={update("companyName")} placeholder="KazTech Ventures" required />
+        {/* Step Indicator */}
+        <div style={{ display: "flex", justifyContent: "space-between", margin: "16px 0 24px 0", background: "var(--input-bg)", padding: "8px 16px", borderRadius: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: step === 1 ? "bold" : "normal", color: step === 1 ? "var(--primary)" : "var(--text-muted)" }}>1. {t("auth.step_personal")}</span>
+          <span style={{ fontSize: 13, fontWeight: step === 2 ? "bold" : "normal", color: step === 2 ? "var(--primary)" : "var(--text-muted)" }}>2. {t("auth.step_details")}</span>
+          <span style={{ fontSize: 13, fontWeight: step === 3 ? "bold" : "normal", color: step === 3 ? "var(--primary)" : "var(--text-muted)" }}>3. {t("auth.step_avatar")}</span>
+        </div>
+
+        <div className="auth-form">
+          {/* STEP 1: Personal credentials */}
+          {step === 1 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div className="field-group">
+                <label>{t("register.company_name")} *</label>
+                <input value={form.companyName} onChange={update("companyName")} placeholder="KazTech Ventures" required />
+              </div>
+              <div className="field-group">
+                <label>ФИО представителя *</label>
+                <input value={form.name} onChange={update("name")} placeholder="Арман Сериков" required />
+              </div>
+              <div className="field-group">
+                <label>{t("register.email")} *</label>
+                <input type="email" value={form.email} onChange={update("email")} placeholder="a.serikov@kaztech.kz" required />
+              </div>
+              <div className="field-group">
+                <label>Пароль *</label>
+                <input type="password" value={form.password} onChange={update("password")} placeholder="••••••••" required />
+                {passwordError && <p className="auth-error-inline" style={{ color: "var(--status-rejected)", fontSize: 12, marginTop: 4 }}>{passwordError}</p>}
+              </div>
             </div>
-            <div className="field-group">
-              <label>Индустрия / Направление</label>
-              <input value={form.position} onChange={update("position")} placeholder="Инвестиционный директор / Директор по инновациям" required />
+          )}
+
+          {/* STEP 2: Profile Details */}
+          {step === 2 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div className="field-group">
+                <label>Должность в компании *</label>
+                <input value={form.position} onChange={update("position")} placeholder="Директор по инновациям" required />
+              </div>
+
+              <div className="field-group">
+                <label>{t("register.description")} *</label>
+                <textarea
+                  value={form.description}
+                  onChange={update("description")}
+                  placeholder="Какого рода проекты вы ищете? Какую поддержку готовы предложить..."
+                  rows={3}
+                  required
+                />
+              </div>
+
+              <div className="field-group">
+                <label>{t("register.industry")} *</label>
+                <div className="chips">
+                  {INDUSTRIES.map((ind) => (
+                    <button
+                      key={ind}
+                      type="button"
+                      className={`chip ${form.industry.includes(ind) ? "active" : ""}`}
+                      onClick={() => toggleIndustry(ind)}
+                    >
+                      {ind}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="fields-row">
-            <div className="field-group">
-              <label>ФИО представителя</label>
-              <input value={form.name} onChange={update("name")} placeholder="Арман Сериков" required />
+          {/* STEP 3: Avatar Crop */}
+          {step === 3 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {avatarDataUrl ? (
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ position: "relative", display: "inline-block", width: 120, height: 120 }}>
+                    <img 
+                      src={avatarDataUrl} 
+                      alt="Avatar Preview" 
+                      style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover", border: "3px solid var(--primary)" }} 
+                    />
+                    <button 
+                      type="button"
+                      className="btn-secondary" 
+                      style={{ position: "absolute", bottom: 0, right: 0, borderRadius: "50%", padding: 6 }} 
+                      onClick={() => setAvatarDataUrl(null)}
+                    >
+                      <Camera size={14} />
+                    </button>
+                  </div>
+                  <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8 }}>Фото профиля успешно настроено!</p>
+                </div>
+              ) : (
+                <AvatarCropper 
+                  onCropComplete={(croppedData) => setAvatarDataUrl(croppedData)} 
+                  onCancel={() => setAvatarDataUrl(null)} 
+                />
+              )}
             </div>
-            <div className="field-group">
-              <label>Рабочий Email</label>
-              <input type="email" value={form.email} onChange={update("email")} placeholder="a.serikov@kaztech.kz" required />
-            </div>
+          )}
+
+          {error && <p className="auth-error" style={{ marginTop: 12 }}>{error}</p>}
+
+          {/* Navigation Controls */}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 24 }}>
+            {step > 1 && (
+              <button type="button" className="btn-secondary" onClick={handleBack} style={{ flex: 1 }}>
+                {t("common.prev")}
+              </button>
+            )}
+            
+            {step < 3 ? (
+              <button type="button" className="auth-btn" onClick={handleNext} disabled={!isStepValid()} style={{ flex: 2 }}>
+                {t("common.next")}
+              </button>
+            ) : (
+              <button type="button" className="auth-btn" onClick={handleSubmit} disabled={loading} style={{ flex: 2, background: "var(--primary)" }}>
+                {loading ? t("common.loading") : t("auth.register")}
+              </button>
+            )}
           </div>
+        </div>
 
-          <div className="field-group">
-            <label>Описание компании и целей поиска</label>
-            <textarea
-              value={form.description}
-              onChange={update("description")}
-              placeholder="Какого рода проекты, прототипы или команды вы ищете? Какую поддержку готовы предложить (инвестиции, гранты, менторство)..."
-              rows={3}
-              required
-            />
-          </div>
-
-          <div className="field-group">
-            <label>Интересующие сферы <span className="optional">(выберите несколько)</span></label>
-            <div className="chips">
-              {INDUSTRIES.map((ind) => (
-                <button
-                  key={ind}
-                  type="button"
-                  className={`chip ${form.industry.includes(ind) ? "active" : ""}`}
-                  onClick={() => toggleIndustry(ind)}
-                >
-                  {ind}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="field-group">
-            <label>Пароль</label>
-            <input type="password" value={form.password} onChange={update("password")} placeholder="Минимум 6 символов" required />
-          </div>
-
-          {error && <p className="auth-error">{error}</p>}
-
-          <button type="submit" className="auth-btn" style={{ background: "var(--status-pending)" }} disabled={loading}>
-            {loading ? "Создаём аккаунт..." : "Зарегистрироваться"}
-          </button>
-        </form>
-
-        <div className="auth-links">
-          <p>Уже есть аккаунт? <Link to="/login">Войти</Link></p>
+        <div className="auth-links" style={{ marginTop: 20 }}>
+          <p>{t("auth.has_account")} <Link to="/login">{t("common.submit")}</Link></p>
           <p>Вы независимый ученый? <Link to="/register/independent">Регистрация для соавторства</Link></p>
         </div>
       </div>

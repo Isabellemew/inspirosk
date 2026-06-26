@@ -1,16 +1,54 @@
 import { useState, useEffect } from "react";
-import { auth, db } from "../firebase.js";
-import { signOut } from "firebase/auth";
-import {
-  collection, getDocs, doc, updateDoc, deleteDoc
-} from "firebase/firestore";
+import { supabase } from "../supabaseClient.js";
 import { useNavigate } from "react-router-dom";
 import {
-  BarChart2, Users, Folder, FileText, MessageSquare, LogOut, Trash2, Palette, CheckCircle
+  BarChart2, Users, Folder, FileText, MessageSquare, LogOut, Trash2, Palette, CheckCircle,
+  ShieldAlert, Edit, Eye, EyeOff, Award, AlertTriangle, Info, Play
 } from "lucide-react";
 import "./Dashboard.css";
+import { useTranslation } from "../context/TranslationContext";
+import Header from "../components/Header.jsx";
 
 export default function DashboardAdmin() {
+  const { t } = useTranslation();
+
+  // Moderation state
+  const [editingLab, setEditingLab] = useState(null);
+  const [editLabName, setEditLabName] = useState("");
+  const [editLabDesc, setEditLabDesc] = useState("");
+  const [editLabSpots, setEditLabSpots] = useState("");
+
+  const [warningUser, setWarningUser] = useState(null);
+  const [warningText, setWarningText] = useState("");
+  const [warningLevel, setWarningLevel] = useState("info");
+  
+  const [verifiedLabIds, setVerifiedLabIds] = useState(
+    JSON.parse(localStorage.getItem("inspiro-verified-labs") || "[]")
+  );
+  const [hiddenLabIds, setHiddenLabIds] = useState(
+    JSON.parse(localStorage.getItem("inspiro-hidden-labs") || "[]")
+  );
+
+  useEffect(() => {
+    localStorage.setItem("inspiro-verified-labs", JSON.stringify(verifiedLabIds));
+  }, [verifiedLabIds]);
+
+  useEffect(() => {
+    localStorage.setItem("inspiro-hidden-labs", JSON.stringify(hiddenLabIds));
+  }, [hiddenLabIds]);
+
+  const toggleVerifyLab = (labId) => {
+    setVerifiedLabIds(prev =>
+      prev.includes(labId) ? prev.filter(id => id !== labId) : [...prev, labId]
+    );
+  };
+
+  const toggleHideLab = (labId) => {
+    setHiddenLabIds(prev =>
+      prev.includes(labId) ? prev.filter(id => id !== labId) : [...prev, labId]
+    );
+  };
+
   const [users, setUsers] = useState([]);
   const [labs, setLabs] = useState([]);
   const [applications, setApplications] = useState([]);
@@ -19,6 +57,7 @@ export default function DashboardAdmin() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const navigate = useNavigate();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Themes
   const [activeTheme, setActiveTheme] = useState(
@@ -36,15 +75,43 @@ export default function DashboardAdmin() {
   useEffect(() => {
     const fetchAll = async () => {
       const [usersSnap, labsSnap, appsSnap, fbSnap] = await Promise.all([
-        getDocs(collection(db, "users")),
-        getDocs(collection(db, "labs")),
-        getDocs(collection(db, "applications")),
-        getDocs(collection(db, "feedback")),
+        supabase.from("profiles").select("*"),
+        supabase.from("labs").select("*"),
+        supabase.from("applications").select("*"),
+        supabase.from("feedback").select("*"),
       ]);
-      setUsers(usersSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setLabs(labsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setApplications(appsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setFeedback(fbSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      setUsers(usersSnap.data || []);
+      setLabs((labsSnap.data || []).map(l => ({
+        id: l.id,
+        name: l.name,
+        description: l.description,
+        researchAreas: l.research_areas,
+        openSpots: l.open_spots,
+        requirements: l.requirements,
+        professorId: l.professor_id,
+        professorName: l.professor_name,
+      })));
+      setApplications((appsSnap.data || []).map(a => ({
+        id: a.id,
+        studentId: a.student_id,
+        studentName: a.student_name,
+        studentEmail: a.student_email,
+        labId: a.lab_id,
+        labName: a.lab_name,
+        professorId: a.professor_id,
+        motivation: a.motivation,
+        cvUrl: a.cv_url,
+        status: a.status,
+      })));
+      setFeedback((fbSnap.data || []).map(f => ({
+        id: f.id,
+        userName: f.user_name,
+        userRole: f.user_role,
+        text: f.text,
+        createdAt: f.created_at ? new Date(f.created_at) : null,
+      })));
+
       setLoading(false);
     };
     fetchAll();
@@ -58,19 +125,87 @@ export default function DashboardAdmin() {
 
   const handleDeleteUser = async (userId) => {
     if (!window.confirm("Вы уверены, что хотите удалить пользователя?")) return;
-    await deleteDoc(doc(db, "users", userId));
-    setUsers(prev => prev.filter(u => u.id !== userId));
+    const { error } = await supabase.from("profiles").delete().eq("id", userId);
+    if (error) {
+      alert("Ошибка удаления: " + error.message);
+    } else {
+      setUsers(prev => prev.filter(u => u.id !== userId));
+    }
   };
 
   const handleDeleteLab = async (labId) => {
     if (!window.confirm("Вы уверены, что хотите удалить лабораторию?")) return;
-    await deleteDoc(doc(db, "labs", labId));
-    setLabs(prev => prev.filter(l => l.id !== labId));
+    const { error } = await supabase.from("labs").delete().eq("id", labId);
+    if (error) {
+      alert("Ошибка удаления: " + error.message);
+    } else {
+      setLabs(prev => prev.filter(l => l.id !== labId));
+    }
+  };
+
+  const handleSaveLab = async () => {
+    if (!editingLab) return;
+    const { error } = await supabase
+      .from("labs")
+      .update({
+        name: editLabName,
+        description: editLabDesc,
+        open_spots: Number(editLabSpots)
+      })
+      .eq("id", editingLab.id);
+
+    if (error) {
+      alert("Ошибка сохранения: " + error.message);
+    } else {
+      setLabs(prev => prev.map(l => l.id === editingLab.id ? { ...l, name: editLabName, description: editLabDesc, openSpots: Number(editLabSpots) } : l));
+      setEditingLab(null);
+    }
+  };
+
+  const handleIssueWarning = async () => {
+    if (!warningUser) return;
+    let currentWarnings = [];
+    if (warningUser.bio) {
+      try {
+        if (warningUser.bio.startsWith("{") && warningUser.bio.endsWith("}")) {
+          const parsed = JSON.parse(warningUser.bio);
+          currentWarnings = parsed.warnings || [];
+        }
+      } catch (e) {}
+    }
+
+    const newWarning = {
+      text: warningText,
+      level: warningLevel,
+      date: new Date().toLocaleDateString("ru")
+    };
+
+    const updatedBio = JSON.stringify({
+      warnings: [newWarning, ...currentWarnings]
+    });
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({ bio: updatedBio })
+      .eq("id", warningUser.id);
+
+    if (error) {
+      alert("Ошибка при выдаче предупреждения: " + error.message);
+    } else {
+      setUsers(prev => prev.map(u => u.id === warningUser.id ? { ...u, bio: updatedBio } : u));
+      setWarningUser(null);
+      setWarningText("");
+      alert("Предупреждение выдано успешно!");
+    }
   };
 
   const handleChangeRole = async (userId, newRole) => {
-    await updateDoc(doc(db, "users", userId), { role: newRole });
-    setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
+    const { error } = await supabase.from("profiles").update({ role: newRole }).eq("id", userId);
+    if (error) {
+      alert("Ошибка изменения роли: " + error.message);
+    } else {
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
+    }
   };
 
   const students = users.filter(u => u.role === "student");
@@ -97,8 +232,16 @@ export default function DashboardAdmin() {
 
   return (
     <div className="dashboard">
+      {/* ── MOBILE HEADER ── */}
+      <header className="mobile-header" style={{ display: "none" }}>
+        <button className="menu-toggle-btn" onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}>
+          ☰ Меню
+        </button>
+        <span className="land-logo" style={{ fontSize: 18, fontWeight: "bold" }}>inspirosk</span>
+      </header>
+
       {/* ── SIDEBAR ── */}
-      <aside className="dash-sidebar">
+      <aside className={`dash-sidebar ${mobileSidebarOpen ? "mobile-open" : ""}`}>
         <div className="dash-logo">inspirosk</div>
 
         <div className="dash-user">
@@ -126,7 +269,7 @@ export default function DashboardAdmin() {
             ["applications", "📋 Все заявки"],
             ["feedback", "💬 Отзывы"],
           ].map(([tab, label]) => (
-            <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
+            <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => { setActiveTab(tab); setMobileSidebarOpen(false); }}>
               {label}
               {tab === "users" && <span className="badge">{users.length}</span>}
               {tab === "feedback" && feedback.length > 0 && <span className="badge badge-green">{feedback.length}</span>}
@@ -134,13 +277,14 @@ export default function DashboardAdmin() {
           ))}
         </nav>
 
-        <button className="dash-logout" onClick={() => { signOut(auth); navigate("/login"); }}>
+        <button className="dash-logout" onClick={() => { supabase.auth.signOut(); navigate("/login"); }}>
           <LogOut size={16} /> Выйти
         </button>
       </aside>
 
       {/* ── MAIN CONTENT ── */}
       <main className="dash-main">
+        <Header userProfile={{ name: "Администратор", role: "admin" }} />
 
         {/* ── ОБЗОР ── */}
         {activeTab === "overview" && (
@@ -306,8 +450,11 @@ export default function DashboardAdmin() {
                           <option value="admin">Админ</option>
                         </select>
                       </td>
-                      <td>
-                        <button className="btn-delete" onClick={() => handleDeleteUser(user.id)}>
+                      <td style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                        <button className="btn-secondary" style={{ padding: "6px 12px", fontSize: 13, display: "flex", alignItems: "center" }} onClick={() => setWarningUser(user)}>
+                          <ShieldAlert size={13} style={{ marginRight: 4 }} /> Предупреждения
+                        </button>
+                        <button className="btn-delete" style={{ padding: "6px 12px", fontSize: 13, display: "flex", alignItems: "center" }} onClick={() => handleDeleteUser(user.id)}>
                           <Trash2 size={13} style={{ marginRight: 4 }} /> Удалить
                         </button>
                       </td>
@@ -325,21 +472,92 @@ export default function DashboardAdmin() {
             <h1>Лаборатории</h1>
             <p className="dash-subtitle">Модерация зарегистрированных лабораторий</p>
             <div className="labs-grid">
-              {labs.map(lab => (
-                <div className="lab-card" key={lab.id}>
-                  <h3>{lab.name}</h3>
-                  <p className="lab-professor">👨‍🔬 {lab.professorName}</p>
-                  <p className="lab-desc">{lab.description}</p>
-                  {lab.requirements && <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>📋 {lab.requirements}</p>}
-                  <div className="lab-tags">{lab.researchAreas?.map(a => <span key={a} className="tag">{a}</span>)}</div>
-                  <div className="lab-footer">
-                    <span>Мест: {lab.openSpots}</span>
-                    <button className="btn-delete" onClick={() => handleDeleteLab(lab.id)}>
-                      <Trash2 size={13} /> Удалить
-                    </button>
+              {labs.map(lab => {
+                const isVerified = verifiedLabIds.includes(lab.id);
+                const isHidden = hiddenLabIds.includes(lab.id);
+                return (
+                  <div 
+                    className="lab-card" 
+                    key={lab.id} 
+                    style={{ 
+                      display: "flex", 
+                      flexDirection: "column", 
+                      justifyContent: "space-between",
+                      opacity: isHidden ? 0.65 : 1,
+                      borderLeft: isHidden ? "4px solid var(--status-rejected)" : isVerified ? "4px solid var(--status-accepted)" : "1px solid var(--border-color)",
+                      transition: "all 0.3s ease"
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
+                          {lab.name}
+                          {isVerified && <CheckCircle size={16} style={{ color: "var(--status-accepted)", fill: "rgba(16,185,129,0.1)" }} />}
+                        </h3>
+                        {isHidden && (
+                          <span className="tag" style={{ background: "rgba(239,68,68,0.15)", color: "var(--status-rejected)" }}>
+                            Скрыта
+                          </span>
+                        )}
+                      </div>
+                      <p className="lab-professor">👨‍🔬 {lab.professorName}</p>
+                      <p className="lab-desc">{lab.description}</p>
+                      {lab.requirements && <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "8px 0 0 0" }}>📋 {lab.requirements}</p>}
+                    </div>
+                    
+                    <div style={{ marginTop: 16 }}>
+                      <div className="lab-tags" style={{ marginBottom: 12 }}>
+                        {lab.researchAreas?.map(a => <span key={a} className="tag">{a}</span>)}
+                      </div>
+                      <div className="lab-footer" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", borderTop: "1px solid var(--border-color)", paddingTop: 12 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginRight: "auto" }}>
+                          Мест: {lab.openSpots}
+                        </span>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button 
+                            className="btn-secondary" 
+                            style={{ padding: "6px 10px", fontSize: 12 }}
+                            onClick={() => {
+                              setEditingLab(lab);
+                              setEditLabName(lab.name);
+                              setEditLabDesc(lab.description);
+                              setEditLabSpots(lab.openSpots);
+                            }}
+                          >
+                            <Edit size={12} style={{ marginRight: 4 }} /> Ред.
+                          </button>
+                          <button 
+                            className="btn-secondary" 
+                            style={{ 
+                              padding: "6px 10px", 
+                              fontSize: 12,
+                              borderColor: isVerified ? "var(--status-pending)" : "var(--status-accepted)",
+                              color: isVerified ? "var(--status-pending)" : "var(--status-accepted)"
+                            }}
+                            onClick={() => toggleVerifyLab(lab.id)}
+                          >
+                            {isVerified ? "Снять вер." : "Вер."}
+                          </button>
+                          <button 
+                            className="btn-secondary" 
+                            style={{ padding: "6px 10px", fontSize: 12 }}
+                            onClick={() => toggleHideLab(lab.id)}
+                          >
+                            {isHidden ? "Показать" : "Скрыть"}
+                          </button>
+                          <button 
+                            className="btn-delete" 
+                            style={{ padding: "6px 10px", fontSize: 12 }} 
+                            onClick={() => handleDeleteLab(lab.id)}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -383,7 +601,7 @@ export default function DashboardAdmin() {
                           {f.userRole}
                         </span>
                         <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: "auto" }}>
-                          {f.createdAt?.toDate ? f.createdAt.toDate().toLocaleDateString("ru") : ""}
+                          {f.createdAt ? f.createdAt.toLocaleDateString("ru") : ""}
                         </span>
                       </div>
                       <p className="feedback-text" style={{ marginTop: 6 }}>«{f.text}»</p>
@@ -394,6 +612,272 @@ export default function DashboardAdmin() {
           </div>
         )}
       </main>
+
+      {/* ── EDIT LAB MODAL ── */}
+      {editingLab && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(0, 0, 0, 0.65)",
+          backdropFilter: "blur(4px)",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          zIndex: 1000
+        }}>
+          <div style={{
+            width: "90%",
+            maxWidth: "500px",
+            backgroundColor: "var(--dash-card)",
+            border: "1px solid var(--border-color)",
+            borderRadius: "16px",
+            padding: "24px",
+            boxShadow: "0 20px 40px var(--shadow)",
+            color: "var(--text-primary)"
+          }}>
+            <h2 style={{ margin: "0 0 16px 0", fontSize: 20 }}>Редактировать лабораторию</h2>
+            
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 20 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <label style={{ fontSize: 13, color: "var(--text-secondary)" }}>Название лаборатории</label>
+                <input 
+                  type="text" 
+                  value={editLabName} 
+                  onChange={e => setEditLabName(e.target.value)}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border-color)",
+                    background: "var(--input-bg)",
+                    color: "var(--text-primary)",
+                    fontSize: 14
+                  }}
+                />
+              </div>
+              
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <label style={{ fontSize: 13, color: "var(--text-secondary)" }}>Описание</label>
+                <textarea 
+                  value={editLabDesc} 
+                  onChange={e => setEditLabDesc(e.target.value)}
+                  rows={4}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border-color)",
+                    background: "var(--input-bg)",
+                    color: "var(--text-primary)",
+                    fontSize: 14,
+                    resize: "vertical"
+                  }}
+                />
+              </div>
+              
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <label style={{ fontSize: 13, color: "var(--text-secondary)" }}>Свободных мест</label>
+                <input 
+                  type="number" 
+                  value={editLabSpots} 
+                  onChange={e => setEditLabSpots(e.target.value)}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border-color)",
+                    background: "var(--input-bg)",
+                    color: "var(--text-primary)",
+                    fontSize: 14
+                  }}
+                />
+              </div>
+            </div>
+            
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button 
+                className="btn-secondary" 
+                style={{ padding: "10px 18px" }}
+                onClick={() => setEditingLab(null)}
+              >
+                Отмена
+              </button>
+              <button 
+                className="btn-apply" 
+                style={{ padding: "10px 18px", background: "var(--primary)", color: "#fff", border: "none", borderRadius: "8px", cursor: "pointer" }}
+                onClick={handleSaveLab}
+              >
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── WARNINGS MODAL ── */}
+      {warningUser && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(0, 0, 0, 0.65)",
+          backdropFilter: "blur(4px)",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          zIndex: 1000
+        }}>
+          <div style={{
+            width: "95%",
+            maxWidth: "600px",
+            backgroundColor: "var(--dash-card)",
+            border: "1px solid var(--border-color)",
+            borderRadius: "16px",
+            padding: "24px",
+            boxShadow: "0 20px 40px var(--shadow)",
+            color: "var(--text-primary)",
+            maxHeight: "90vh",
+            overflowY: "auto"
+          }}>
+            <h2 style={{ margin: "0 0 4px 0", fontSize: 20 }}>Управление предупреждениями</h2>
+            <p style={{ margin: "0 0 20px 0", fontSize: 13, color: "var(--text-secondary)" }}>
+              Пользователь: <strong>{warningUser.name || "Аноним"}</strong> ({warningUser.email})
+            </p>
+            
+            {/* Warning History */}
+            <div style={{ marginBottom: 24 }}>
+              <h3 style={{ fontSize: 15, margin: "0 0 10px 0", color: "var(--text-primary)" }}>История предупреждений</h3>
+              {(() => {
+                const currentUserInModal = users.find(u => u.id === warningUser.id);
+                const getWarningsForUser = (user) => {
+                  if (!user?.bio) return [];
+                  try {
+                    if (user.bio.startsWith("{") && user.bio.endsWith("}")) {
+                      const parsed = JSON.parse(user.bio);
+                      return parsed.warnings || [];
+                    }
+                  } catch (e) {}
+                  return [];
+                };
+                const warningsList = getWarningsForUser(currentUserInModal);
+                
+                if (warningsList.length === 0) {
+                  return (
+                    <div style={{ padding: "16px", background: "var(--input-bg)", borderRadius: "8px", color: "var(--text-muted)", fontSize: 13, textAlign: "center" }}>
+                      История пуста. Предупреждений нет.
+                    </div>
+                  );
+                }
+                
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: "200px", overflowY: "auto", paddingRight: "6px" }}>
+                    {warningsList.map((w, idx) => (
+                      <div 
+                        key={idx} 
+                        style={{ 
+                          padding: "12px", 
+                          background: "var(--input-bg)", 
+                          borderRadius: "8px", 
+                          borderLeft: `4px solid ${w.level === "ban" ? "var(--status-rejected)" : w.level === "warning" ? "var(--status-pending)" : "var(--primary)"}`,
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "flex-start",
+                          gap: 12
+                        }}
+                      >
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: "bold", textTransform: "uppercase", color: w.level === "ban" ? "var(--status-rejected)" : w.level === "warning" ? "var(--status-pending)" : "var(--primary)" }}>
+                            {w.level === "ban" ? "Бан 🚫" : w.level === "warning" ? "Предупреждение ⚠️" : "Инфо ℹ️"}
+                          </span>
+                          <span style={{ fontSize: 13, color: "var(--text-primary)" }}>{w.text}</span>
+                        </div>
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>{w.date}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+            
+            {/* New Warning Form */}
+            <div style={{ borderTop: "1px solid var(--border-color)", paddingTop: 20, marginBottom: 20 }}>
+              <h3 style={{ fontSize: 15, margin: "0 0 12px 0" }}>Выдать новое предупреждение</h3>
+              
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>Описание нарушения</label>
+                  <textarea 
+                    placeholder="Укажите причину предупреждения или блокировки..."
+                    value={warningText}
+                    onChange={e => setWarningText(e.target.value)}
+                    rows={3}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-color)",
+                      background: "var(--input-bg)",
+                      color: "var(--text-primary)",
+                      fontSize: 14,
+                      resize: "vertical"
+                    }}
+                  />
+                </div>
+                
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>Уровень предупреждения</label>
+                  <select 
+                    value={warningLevel}
+                    onChange={e => setWarningLevel(e.target.value)}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-color)",
+                      background: "var(--input-bg)",
+                      color: "var(--text-primary)",
+                      fontSize: 14
+                    }}
+                  >
+                    <option value="info">Инфо ℹ️ (Информационное сообщение)</option>
+                    <option value="warning">Предупреждение ⚠️ (Выговор)</option>
+                    <option value="ban">Бан 🚫 (Блокировка действий)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button 
+                className="btn-secondary" 
+                style={{ padding: "10px 18px" }}
+                onClick={() => {
+                  setWarningUser(null);
+                  setWarningText("");
+                  setWarningLevel("info");
+                }}
+              >
+                Закрыть
+              </button>
+              <button 
+                className="btn-apply" 
+                style={{ 
+                  padding: "10px 18px", 
+                  background: warningLevel === "ban" ? "var(--status-rejected)" : warningLevel === "warning" ? "var(--status-pending)" : "var(--primary)", 
+                  color: "#fff", 
+                  border: "none", 
+                  borderRadius: "8px", 
+                  cursor: "pointer" 
+                }}
+                onClick={handleIssueWarning}
+                disabled={!warningText.trim()}
+              >
+                Отправить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

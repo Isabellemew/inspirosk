@@ -1,30 +1,45 @@
 import { useState, useEffect, useRef } from "react";
-import { auth, db } from "../firebase.js";
-import { signOut } from "firebase/auth";
-import {
-  doc, getDoc, collection, getDocs, query, where,
-  addDoc, updateDoc, deleteDoc, serverTimestamp, orderBy, onSnapshot
-} from "firebase/firestore";
+import { supabase } from "../supabaseClient.js";
 import { useNavigate } from "react-router-dom";
 import {
   MessageSquare, Send, Paperclip, LogOut, CheckCircle, Clock, FileText,
-  Info, Star, Upload, Palette, Plus, Landmark, Briefcase, HelpCircle
+  Info, Star, Upload, Palette, Plus, Landmark, Briefcase, ShieldAlert, Video
 } from "lucide-react";
 import "./Dashboard.css";
+import { useTranslation } from "../context/TranslationContext";
+import Header from "../components/Header.jsx";
+import InterviewBar from "../components/InterviewBar.jsx";
 
 export default function DashboardBusiness() {
+  const { t } = useTranslation();
+
+  useEffect(() => {
+    window.onStartVideoCall = (url) => {
+      setJoiningVideoRoom(url);
+    };
+    return () => {
+      window.onStartVideoCall = null;
+    };
+  }, []);
+
+  const [user, setUser] = useState(null);
   const [userData, setUserData] = useState(null);
   const [commercialProjects, setCommercialProjects] = useState([]);
   const [myChallenges, setMyChallenges] = useState([]);
-  const [myCooperations, setMyCooperations] = useState([]); // requests I sent to researchers
+  const [myCooperations, setMyCooperations] = useState([]);
   const [chats, setChats] = useState({});
   const [activeTab, setActiveTab] = useState("commercial-projects");
   const [activeChatId, setActiveChatId] = useState(null);
   const [chatMessage, setChatMessage] = useState("");
+  
+  const [joiningVideoRoom, setJoiningVideoRoom] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showChallengeForm, setShowChallengeForm] = useState(false);
   const [proposingTo, setProposingTo] = useState(null);
   const [proposalText, setProposalText] = useState("");
+
+  // Mobile sidebar state
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // New Challenge Form State
   const [challengeForm, setChallengeForm] = useState({
@@ -52,66 +67,100 @@ export default function DashboardBusiness() {
   const chatBottomRef = useRef(null);
   const navigate = useNavigate();
 
+  const getWarnings = () => {
+    if (!userData?.bio) return [];
+    try {
+      if (userData.bio.startsWith("{") && userData.bio.endsWith("}")) {
+        const parsed = JSON.parse(userData.bio);
+        return parsed.warnings || [];
+      }
+    } catch (e) {}
+    return [];
+  };
+
+  const fetchCoops = async (userId) => {
+    const { data: coopsData } = await supabase
+      .from("applications")
+      .select("*")
+      .eq("student_id", userId);
+    setMyCooperations(coopsData || []);
+  };
+
   useEffect(() => {
     const fetchData = async () => {
-      const user = auth.currentUser;
-      if (!user) return;
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) return navigate("/login");
+      setUser(currentUser);
 
       // 1. Fetch User Data
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      if (userDoc.exists()) {
-        setUserData(userDoc.data());
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", currentUser.id)
+        .single();
+
+      if (profile) {
+        setUserData(profile);
       }
 
-      // 2. Fetch Commercial Projects (labs where isCommercial is true)
-      const labsSnap = await getDocs(collection(db, "labs"));
-      const commProjs = labsSnap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .filter(l => l.isCommercial);
+      // 2. Fetch Commercial Projects (labs where is_commercial is true)
+      const { data: labsData } = await supabase.from("labs").select("*");
+      const commProjs = (labsData || []).filter(l => l.is_commercial);
       setCommercialProjects(commProjs);
 
       // 3. Fetch My Posted Challenges
-      const challengesSnap = await getDocs(
-        query(collection(db, "business_challenges"), where("companyId", "==", user.uid))
-      );
-      setMyChallenges(challengesSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const { data: challenges } = await supabase
+        .from("business_challenges")
+        .select("*")
+        .eq("company_id", currentUser.id);
+      setMyChallenges(challenges || []);
 
-      // 4. Fetch My Cooperations (chat nodes / applications with researchers)
-      const coopsSnap = await getDocs(
-        query(collection(db, "applications"), where("studentId", "==", user.uid)) // we map investor to studentId for system simplicity
-      );
-      setMyCooperations(coopsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // 4. Fetch My Cooperations (applications where student_id == current user id)
+      await fetchCoops(currentUser.id);
 
       setLoading(false);
     };
 
     fetchData();
-  }, []);
+  }, [navigate]);
+
+  // Fetch Messages helper
+  const fetchMessages = async (appId) => {
+    const { data: msgs } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("application_id", appId)
+      .order("created_at", { ascending: true });
+    
+    setChats(prev => ({
+      ...prev,
+      [appId]: msgs || []
+    }));
+    setTimeout(() => {
+      chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 80);
+  };
 
   // Chat listener
   useEffect(() => {
     if (!activeChatId) return;
 
-    const q = query(
-      collection(db, "chats", activeChatId, "messages"),
-      orderBy("createdAt", "asc")
-    );
+    fetchMessages(activeChatId);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map(d => ({
-        id: d.id,
-        ...d.data()
-      }));
-      setChats(prev => ({
-        ...prev,
-        [activeChatId]: msgs
-      }));
-      setTimeout(() => {
-        chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 80);
-    });
+    const subscription = supabase
+      .channel(`chat_${activeChatId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "messages", filter: `application_id=eq.${activeChatId}` },
+        () => {
+          fetchMessages(activeChatId);
+        }
+      )
+      .subscribe();
 
-    return () => unsubscribe();
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [activeChatId]);
 
   const handleThemeChange = (newTheme) => {
@@ -121,22 +170,28 @@ export default function DashboardBusiness() {
   };
 
   const handleCreateChallenge = async () => {
+    const warnings = getWarnings();
+    if (warnings.some(w => w.level === "ban")) {
+      alert("Вы заблокированы администратором и не можете публиковать задачи.");
+      return;
+    }
     if (!challengeForm.title || !challengeForm.description) return alert("Заполните заголовок и описание");
-    const user = auth.currentUser;
+    
     const challengeData = {
       title: challengeForm.title,
       description: challengeForm.description,
-      researchArea: challengeForm.researchArea,
+      research_area: challengeForm.researchArea,
       budget: Number(challengeForm.budget || 0),
       deadline: challengeForm.deadline || "",
-      companyId: user.uid,
-      companyName: userData?.companyName || "Бизнес Партнер",
-      representativeName: userData?.name || user.email,
-      createdAt: serverTimestamp(),
+      company_id: user.id,
+      company_name: userData?.company_name || "Бизнес Партнер",
+      representative_name: userData?.name || user.email,
     };
 
-    const docRef = await addDoc(collection(db, "business_challenges"), challengeData);
-    setMyChallenges(prev => [...prev, { id: docRef.id, ...challengeData }]);
+    const { data: newChallenge } = await supabase.from("business_challenges").insert(challengeData).select().single();
+    if (newChallenge) {
+      setMyChallenges(prev => [...prev, newChallenge]);
+    }
     setShowChallengeForm(false);
     setChallengeForm({
       title: "", description: "", researchArea: "Machine Learning", budget: "", deadline: ""
@@ -145,29 +200,34 @@ export default function DashboardBusiness() {
 
   const handleDeleteChallenge = async (id) => {
     if (!window.confirm("Удалить этот технологический запрос?")) return;
-    await deleteDoc(doc(db, "business_challenges", id));
+    await supabase.from("business_challenges").delete().eq("id", id);
     setMyChallenges(prev => prev.filter(c => c.id !== id));
   };
 
   const handleProposeCooperation = async (proj) => {
+    const warnings = getWarnings();
+    if (warnings.some(w => w.level === "ban")) {
+      alert("Вы заблокированы администратором и не можете предлагать сотрудничество.");
+      return;
+    }
     if (!proposalText.trim()) return alert("Введите текст предложения");
-    const user = auth.currentUser;
 
     const coopData = {
-      studentId: user.uid,
-      studentName: `${userData?.companyName || "Инвестор"} (${userData?.name || user.email})`,
-      studentEmail: user.email,
-      labId: proj.id,
-      labName: proj.name,
-      professorId: proj.professorId,
+      student_id: user.id,
+      student_name: `${userData?.company_name || "Инвестор"} (${userData?.name || user.email})`,
+      student_email: user.email,
+      lab_id: proj.id,
+      lab_name: proj.name,
+      professor_id: proj.professor_id,
       motivation: proposalText,
-      status: "pending", // starts as pending, researcher accepts to start chat
-      isInvestorProposal: true,
-      createdAt: serverTimestamp(),
+      status: "pending",
+      is_investor_proposal: true,
+      timeline_data: [{ status: "pending", date: new Date().toLocaleDateString("ru"), note: "Отправлено инвестиционное предложение." }]
     };
 
-    const docRef = await addDoc(collection(db, "applications"), coopData);
-    setMyCooperations(prev => [...prev, { id: docRef.id, ...coopData }]);
+    await supabase.from("applications").insert(coopData);
+    await fetchCoops(user.id);
+    
     setProposingTo(null);
     setProposalText("");
 
@@ -176,20 +236,19 @@ export default function DashboardBusiness() {
 
   const handleSendMessage = async (appId) => {
     if (!chatMessage.trim()) return;
-    const user = auth.currentUser;
     const textToSend = chatMessage;
     setChatMessage("");
 
-    await addDoc(collection(db, "chats", appId, "messages"), {
+    await supabase.from("messages").insert({
+      application_id: appId,
       text: textToSend,
-      senderId: user.uid,
-      senderName: userData?.companyName || "Инвестор",
-      senderRole: "business",
-      createdAt: serverTimestamp(),
+      sender_id: user.id,
+      sender_name: userData?.company_name || "Инвестор",
+      sender_role: "business",
     });
   };
 
-  const initials = userData?.companyName?.slice(0, 2).toUpperCase() || "BI";
+  const initials = userData?.company_name?.slice(0, 2).toUpperCase() || "BI";
 
   const chatApps = myCooperations.filter(c => c.status === "accepted" || c.status === "interview");
   const activeChatApp = chatApps.find(a => a.id === activeChatId);
@@ -201,8 +260,17 @@ export default function DashboardBusiness() {
 
   return (
     <div className="dashboard">
+      
+      {/* Mobile Header */}
+      <header className="mobile-header" style={{ display: "none" }}>
+        <button className="menu-toggle-btn" onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}>
+          ☰ Меню
+        </button>
+        <span className="land-logo" style={{ fontSize: 18, fontWeight: "bold" }}>inspirosk</span>
+      </header>
+
       {/* Sidebar */}
-      <aside className="dash-sidebar">
+      <aside className={`dash-sidebar ${mobileSidebarOpen ? "mobile-open" : ""}`}>
         <div className="dash-logo">inspirosk</div>
 
         <div className="dash-user">
@@ -224,26 +292,85 @@ export default function DashboardBusiness() {
 
         <nav className="dash-nav">
           {[
-            ["commercial-projects", "📈 Рынок разработок", commercialProjects.length],
-            ["my-challenges", "🎯 Запросы бизнеса (R&D)", myChallenges.length],
-            ["cooperations", "📥 Мои предложения", myCooperations.length],
-            ["chat", "💬 Переговоры", chatApps.length],
-            ["profile", "👤 Профиль", 0],
+            ["commercial-projects", "💼 " + t("nav.commercial_projects"), commercialProjects.length],
+            ["my-challenges", "⚡ " + t("nav.challenges"), myChallenges.length],
+            ["cooperations", "🤝 " + t("nav.my_applications"), myCooperations.length],
+            ["interview", "🎯 " + t("nav.interviews"), myCooperations.filter(c => c.status === "interview").length],
+            ["chat", "💬 " + t("nav.chats"), chatApps.length],
+            ["profile", "👤 " + t("common.profile"), 0],
           ].map(([tab, label, count]) => (
-            <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => { setActiveTab(tab); if(tab === "chat" && chatApps.length > 0) setActiveChatId(chatApps[0].id); }}>
+            <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => { setActiveTab(tab); setMobileSidebarOpen(false); if(tab === "chat" && chatApps.length > 0) setActiveChatId(chatApps[0].id); }}>
               {label}
               {count > 0 && <span className="badge">{count}</span>}
             </button>
           ))}
         </nav>
 
-        <button className="dash-logout" onClick={() => { signOut(auth); navigate("/login"); }}>
+        <button className="dash-logout" onClick={() => { supabase.auth.signOut(); navigate("/login"); }}>
           <LogOut size={16} /> Выйти
         </button>
       </aside>
 
       {/* Main Content */}
       <main className="dash-main">
+        <Header userProfile={userData} onOpenSettings={() => setActiveTab("profile")} />
+
+        {getWarnings().map((w, idx) => (
+          <div key={idx} style={{ 
+            margin: "16px 32px 0 32px", 
+            padding: "12px 18px", 
+            borderRadius: 12, 
+            background: w.level === "ban" ? "rgba(239,68,68,0.15)" : w.level === "warning" ? "rgba(245,158,11,0.15)" : "rgba(59,130,246,0.15)",
+            border: `1px solid ${w.level === "ban" ? "var(--status-rejected)" : w.level === "warning" ? "var(--status-pending)" : "var(--primary)"}`,
+            color: "var(--text-primary)",
+            display: "flex",
+            alignItems: "center",
+            gap: 12
+          }}>
+            <ShieldAlert size={20} style={{ color: w.level === "ban" ? "var(--status-rejected)" : w.level === "warning" ? "var(--status-pending)" : "var(--primary)", flexShrink: 0 }} />
+            <div>
+              <strong style={{ textTransform: "uppercase", fontSize: 12, display: "block" }}>
+                Системное предупреждение: {w.level === "ban" ? "БАН" : w.level === "warning" ? "ПРЕДУПРЕЖДЕНИЕ" : "ИНФО"}
+              </strong>
+              <span style={{ fontSize: 13 }}>{w.text}</span>
+            </div>
+          </div>
+        ))}
+
+        {/* ── ИНТЕРВЬЮ ── */}
+        {activeTab === "interview" && (
+          <div className="dash-content">
+            <h1>{t("nav.interviews")}</h1>
+            <p className="dash-subtitle">Собеседования по вашим прикладным предложениям</p>
+
+            {myCooperations.filter(c => c.status === "interview").length === 0 ? (
+              <div className="empty-state">
+                <Video size={32} />
+                У вас нет приглашений на интервью.
+              </div>
+            ) : (
+              <div className="labs-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))" }}>
+                {myCooperations.filter(c => c.status === "interview").map(app => (
+                  <div className="lab-card" key={app.id} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div>
+                      <h3 style={{ margin: "0 0 4px 0" }}>{app.lab_name}</h3>
+                      <p style={{ margin: 0, fontSize: 13, color: "var(--primary-light)" }}>
+                        Ученый: {app.student_name}
+                      </p>
+                    </div>
+                    <div style={{ borderTop: "1px solid var(--border-color)", paddingTop: 14 }}>
+                      <InterviewBar 
+                        application={app} 
+                        currentUserRole="student" // Treat investor as candidate selector here
+                        onUpdate={async () => fetchCoops(user.id)} 
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Tab 1: Commercial Projects Marketplace */}
         {activeTab === "commercial-projects" && (
@@ -255,29 +382,29 @@ export default function DashboardBusiness() {
 
             <div className="labs-grid">
               {commercialProjects.map(proj => {
-                const coop = myCooperations.find(c => c.labId === proj.id);
+                const coop = myCooperations.find(c => c.lab_id === proj.id);
                 return (
                   <div className="lab-card" key={proj.id} style={{ borderLeft: "4px solid var(--status-pending)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <h3>{proj.name}</h3>
-                      <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)" }}>$ {proj.fundingNeeded?.toLocaleString() || "Финансирование"}</span>
+                      <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)" }}>$ {proj.funding_needed?.toLocaleString() || "Финансирование"}</span>
                     </div>
                     <p style={{ fontSize: 13, color: "var(--primary-light)", margin: "4px 0" }}>
-                      👨‍🔬 Автор: {proj.professorName} {proj.isIndependent ? "(Независимый)" : `(${proj.university || "Лаборатория"})`}
+                      👨‍🔬 Автор: {proj.professor_name} {proj.is_independent ? "(Независимый)" : ""}
                     </p>
                     <p className="lab-desc">{proj.description}</p>
                     
                     <div style={{ background: "var(--input-bg)", padding: 12, borderRadius: 8, margin: "12px 0", fontSize: 13 }}>
-                      <p style={{ margin: "4px 0" }}>🛠 <strong>Статус прототипа:</strong> {proj.prototypeStatus || "В разработке"}</p>
-                      <p style={{ margin: "4px 0" }}>📊 <strong>Рыночный потенциал:</strong> {proj.marketPotential || "Ожидает оценки"}</p>
+                      <p style={{ margin: "4px 0" }}>🛠 <strong>Статус прототипа:</strong> {proj.prototype_status || "В разработке"}</p>
+                      <p style={{ margin: "4px 0" }}>📊 <strong>Рыночный потенциал:</strong> {proj.market_potential || "Ожидает оценки"}</p>
                     </div>
 
                     <div className="lab-tags">
-                      {proj.researchAreas?.map(a => <span key={a} className="tag">{a}</span>)}
+                      {proj.research_areas?.map(a => <span key={a} className="tag">{a}</span>)}
                     </div>
 
                     <div className="lab-footer" style={{ marginTop: 15 }}>
-                      <span>Мест / Доля: договорная</span>
+                      <span>Сделка: доля/контракт</span>
                       {coop ? (
                         <span className={`status-badge ${statusClass(coop.status)}`}>{statusLabel(coop.status)}</span>
                       ) : (
@@ -291,7 +418,7 @@ export default function DashboardBusiness() {
           </div>
         )}
 
-        {/* Tab 2: My Challenges (R&D queries) */}
+        {/* Tab 2: My Challenges */}
         {activeTab === "my-challenges" && (
           <div className="dash-content">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
@@ -309,12 +436,12 @@ export default function DashboardBusiness() {
                 <h2>Новый запрос на исследование (Challenge)</h2>
                 <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 15 }}>
                   <div className="field-group">
-                    <label>Название проблемы / Тема</label>
-                    <input type="text" placeholder="Пример: Оптимизация маршрутов логистики с помощью ИИ" value={challengeForm.title} onChange={e => setChallengeForm({...challengeForm, title: e.target.value})} />
+                    <label>Название проблемы</label>
+                    <input type="text" placeholder="Тема..." value={challengeForm.title} onChange={e => setChallengeForm({...challengeForm, title: e.target.value})} />
                   </div>
                   <div className="field-group">
-                    <label>Подробное описание задачи (Что нужно сделать, какие данные есть)</label>
-                    <textarea placeholder="Опишите требования, условия тестирования..." value={challengeForm.description} onChange={e => setChallengeForm({...challengeForm, description: e.target.value})} rows={4} />
+                    <label>Описание задачи</label>
+                    <textarea placeholder="Опишите требования..." value={challengeForm.description} onChange={e => setChallengeForm({...challengeForm, description: e.target.value})} rows={4} />
                   </div>
                   <div className="field-group">
                     <label>Научная область</label>
@@ -324,11 +451,11 @@ export default function DashboardBusiness() {
                   </div>
                   <div className="field-group">
                     <label>Бюджет на R&D ($)</label>
-                    <input type="number" placeholder="Пример: 20000" value={challengeForm.budget} onChange={e => setChallengeForm({...challengeForm, budget: e.target.value})} />
+                    <input type="number" placeholder="Бюджет..." value={challengeForm.budget} onChange={e => setChallengeForm({...challengeForm, budget: e.target.value})} />
                   </div>
                   <div className="field-group">
-                    <label>Сроки (Срок подачи предложений)</label>
-                    <input type="text" placeholder="Пример: До конца 2026 года" value={challengeForm.deadline} onChange={e => setChallengeForm({...challengeForm, deadline: e.target.value})} />
+                    <label>Сроки</label>
+                    <input type="text" placeholder="Дедлайн..." value={challengeForm.deadline} onChange={e => setChallengeForm({...challengeForm, deadline: e.target.value})} />
                   </div>
 
                   <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
@@ -346,7 +473,7 @@ export default function DashboardBusiness() {
                 <div className="lab-card" key={ch.id}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <h3>{ch.title}</h3>
-                    <button className="btn-secondary" style={{ padding: "4px 8px", fontSize: 11, background: "var(--status-rejected-bg)", color: "var(--status-rejected)" }} onClick={() => handleDeleteChallenge(ch.id)}>Удалить</button>
+                    <button className="btn-secondary" style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-rejected)" }} onClick={() => handleDeleteChallenge(ch.id)}>Удалить</button>
                   </div>
                   <p className="lab-desc">{ch.description}</p>
                   <div style={{ background: "var(--input-bg)", padding: 10, borderRadius: 8, margin: "10px 0", fontSize: 12 }}>
@@ -354,7 +481,7 @@ export default function DashboardBusiness() {
                     <p style={{ margin: "2px 0" }}>⏳ <strong>Дедлайн:</strong> {ch.deadline || "Не ограничен"}</p>
                   </div>
                   <div className="lab-tags">
-                    <span className="tag">{ch.researchArea}</span>
+                    <span className="tag">{ch.research_area}</span>
                   </div>
                 </div>
               ))}
@@ -374,7 +501,7 @@ export default function DashboardBusiness() {
               {myCooperations.map(coop => (
                 <div className="lab-card" key={coop.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
-                    <h3>{coop.labName}</h3>
+                    <h3>{coop.lab_name}</h3>
                     <p style={{ margin: "4px 0 0 0", fontSize: 12, color: "var(--text-muted)" }}>Предложение: "{coop.motivation.slice(0, 60)}..."</p>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -389,7 +516,7 @@ export default function DashboardBusiness() {
           </div>
         )}
 
-        {/* Tab 4: Chats & Negotiations */}
+        {/* Tab 4: Chats */}
         {activeTab === "chat" && (
           <div className="dash-content chat-tab-container" style={{ height: "calc(100vh - 120px)" }}>
             <h1>Переговоры</h1>
@@ -397,12 +524,12 @@ export default function DashboardBusiness() {
               {/* Chat sidebar */}
               <div className="chat-list-sidebar" style={{ width: 250, borderRight: "1px solid var(--border-color)" }}>
                 {chatApps.length === 0 ? (
-                  <p style={{ padding: 15, fontSize: 12, color: "var(--text-muted)" }}>Нет активных переписок. Связь открывается после одобрения предложения автором проекта.</p>
+                  <p style={{ padding: 15, fontSize: 12, color: "var(--text-muted)" }}>Нет активных переписок.</p>
                 ) : (
                   chatApps.map(app => (
                     <div key={app.id} className={`chat-item-node ${activeChatId === app.id ? "active-node" : ""}`} onClick={() => setActiveChatId(app.id)} style={{ padding: 12, cursor: "pointer", borderBottom: "1px solid var(--border-color)", background: activeChatId === app.id ? "var(--primary-glow)" : "transparent" }}>
-                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13 }}>{app.labName}</p>
-                      <p style={{ margin: "2px 0 0 0", fontSize: 11, color: "var(--text-muted)" }}>Автор: {app.studentName === userData?.companyName ? "Сделка" : app.studentName}</p>
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13 }}>{app.lab_name}</p>
+                      <p style={{ margin: "2px 0 0 0", fontSize: 11, color: "var(--text-muted)" }}>Автор: {app.student_name}</p>
                     </div>
                   ))
                 )}
@@ -413,15 +540,15 @@ export default function DashboardBusiness() {
                 {activeChatId && activeChatApp ? (
                   <>
                     <div className="chat-header" style={{ padding: 12, borderBottom: "1px solid var(--border-color)", background: "var(--dash-card)" }}>
-                      <h4 style={{ margin: 0 }}>{activeChatApp.labName}</h4>
+                      <h4 style={{ margin: 0 }}>{activeChatApp.lab_name}</h4>
                       <p style={{ margin: 0, fontSize: 11, color: "var(--text-muted)" }}>Диалог по сделке</p>
                     </div>
                     <div className="chat-messages-container" style={{ flex: 1, padding: 15, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
-                      {chats[activeChatId]?.map(msg => {
-                        const isMe = msg.senderId === auth.currentUser.uid;
+                      {(chats[activeChatId] || []).map(msg => {
+                        const isMe = msg.sender_id === user.id;
                         return (
                           <div key={msg.id} style={{ alignSelf: isMe ? "flex-end" : "flex-start", background: isMe ? "var(--primary)" : "var(--dash-card)", padding: "10px 14px", borderRadius: 12, maxWidth: "60%" }}>
-                            <p style={{ margin: 0, fontSize: 11, fontWeight: "bold", color: isMe ? "#fff" : "var(--primary-light)" }}>{msg.senderName}</p>
+                            <p style={{ margin: 0, fontSize: 11, fontWeight: "bold", color: isMe ? "#fff" : "var(--primary-light)" }}>{msg.sender_name}</p>
                             <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "#fff" }}>{msg.text}</p>
                           </div>
                         );
@@ -448,12 +575,12 @@ export default function DashboardBusiness() {
             <p className="dash-subtitle">Контактные данные и сферы интересов</p>
 
             <div className="lab-card" style={{ padding: 24 }}>
-              <h2>{userData?.companyName}</h2>
+              <h2>{userData?.company_name}</h2>
               <p style={{ color: "var(--status-pending)" }}>Бизнес-партнер / Инвестор</p>
               <p><strong>Представитель:</strong> {userData?.name}</p>
               <p><strong>Email:</strong> {userData?.email}</p>
               <p><strong>Индустрия:</strong> {userData?.position}</p>
-              <p><strong>О компании и целях:</strong></p>
+              <p><strong>О компании:</strong></p>
               <p style={{ background: "var(--input-bg)", padding: 12, borderRadius: 8 }}>{userData?.description}</p>
             </div>
           </div>
@@ -465,26 +592,39 @@ export default function DashboardBusiness() {
       {proposingTo && (
         <div className="lightbox-overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center", position: "fixed", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.8)", zIndex: 100 }}>
           <div className="lab-card" style={{ width: "500px", padding: 24 }}>
-            <h2>Предложение сотрудничества / инвестиций</h2>
-            <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Проект: {proposingTo.name}</p>
+            <h2>Предложение сотрудничества</h2>
+            <p>Проект: {proposingTo.name}</p>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 15 }}>
-              <div className="field-group">
-                <label>Опишите ваше предложение (Формат сотрудничества, бюджет, контакты)</label>
-                <textarea
-                  value={proposalText}
-                  onChange={e => setProposalText(e.target.value)}
-                  placeholder="Пример: Добрый день, нас очень заинтересовала ваша разработка. Готовы обсудить пилотное внедрение на базе нашей компании и инвестиции в размере $20,000..."
-                  rows={5}
-                  required
-                />
-              </div>
-
+              <textarea
+                value={proposalText}
+                onChange={e => setProposalText(e.target.value)}
+                placeholder="Опишите предложение..."
+                rows={5}
+                required
+              />
               <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                <button className="btn-apply" onClick={() => handleProposeCooperation(proposingTo)}>Отправить предложение</button>
-                <button className="btn-secondary" onClick={() => { setProposingTo(null); setProposalText(""); }}>Отмена</button>
+                <button className="btn-apply" onClick={() => handleProposeCooperation(proposingTo)}>Отправить</button>
+                <button className="btn-secondary" onClick={() => setProposingTo(null)}>Отмена</button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+      {/* ── Daily.co Video Interview Iframe Modal ── */}
+      {joiningVideoRoom && (
+        <div className="modal-overlay" onClick={() => setJoiningVideoRoom(null)}>
+          <div className="modal" style={{ maxWidth: 800, width: "95%", height: "600px", padding: 20 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-color)", paddingBottom: 10, marginBottom: 15 }}>
+              <h3 style={{ margin: 0 }}>🎥 Видео-интервью Daily.co</h3>
+              <button className="btn-secondary" onClick={() => setJoiningVideoRoom(null)} style={{ padding: "4px 8px" }}>Выйти</button>
+            </div>
+            <iframe 
+              title="Видео-интервью Daily.co"
+              src={joiningVideoRoom} 
+              allow="camera; microphone; fullscreen; display-capture; autoplay" 
+              style={{ width: "100%", height: "480px", border: "none", borderRadius: 12 }} 
+            />
           </div>
         </div>
       )}

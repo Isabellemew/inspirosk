@@ -1,116 +1,33 @@
 import { useState, useEffect, useRef } from "react";
-import { auth, db } from "../firebase.js";
-import { signOut } from "firebase/auth";
-import {
-  doc, getDoc, collection, getDocs, query, where,
-  addDoc, updateDoc, deleteDoc, serverTimestamp, orderBy, onSnapshot
-} from "firebase/firestore";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { supabase } from "../supabaseClient.js";
 import { useNavigate } from "react-router-dom";
 import {
-  MessageSquare, Send, Paperclip, Mic, Download,
-  Image as ImageIcon, LogOut, CheckCircle, Clock, FileText,
-  Info, Star, Upload, Palette, Plus, UserPlus, Heart
+  MessageSquare, Send, Paperclip, LogOut, CheckCircle, Clock, FileText,
+  Info, Star, Upload, Palette, Plus, UserPlus, Heart, ShieldAlert, Video, Briefcase
 } from "lucide-react";
 import "./Dashboard.css";
-
-// ── CUSTOM AUDIO PLAYER COMPONENT ──
-function AudioPlayer({ src, duration }) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [playbackRate, setPlaybackRate] = useState(1);
-  const audioRef = useRef(null);
-
-  const togglePlay = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
-    }
-    setIsPlaying(!isPlaying);
-  };
-
-  const handleTimeUpdate = () => {
-    setCurrentTime(audioRef.current.currentTime);
-  };
-
-  const handleEnded = () => {
-    setIsPlaying(false);
-    setCurrentTime(0);
-  };
-
-  const handleSliderChange = (e) => {
-    const time = Number(e.target.value);
-    audioRef.current.currentTime = time;
-    setCurrentTime(time);
-  };
-
-  const changeSpeed = () => {
-    let nextRate = 1;
-    if (playbackRate === 1) nextRate = 1.5;
-    else if (playbackRate === 1.5) nextRate = 2;
-    else nextRate = 1;
-
-    setPlaybackRate(nextRate);
-    if (audioRef.current) {
-      audioRef.current.playbackRate = nextRate;
-    }
-  };
-
-  const formatTime = (secs) => {
-    if (isNaN(secs)) return "0:00";
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}:${s < 10 ? "0" : ""}${s}`;
-  };
-
-  return (
-    <div className="audio-message-player">
-      <audio
-        ref={audioRef}
-        src={src}
-        onTimeUpdate={handleTimeUpdate}
-        onEnded={handleEnded}
-      />
-      <button className="audio-play-btn" onClick={togglePlay}>
-        {isPlaying ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-          </svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8 5v14l11-7z" />
-          </svg>
-        )}
-      </button>
-      <div className="audio-wave-container">
-        <input
-          type="range"
-          min="0"
-          max={audioRef.current?.duration || duration || 100}
-          value={currentTime}
-          onChange={handleSliderChange}
-          className="audio-progress-bar"
-        />
-        <div className="audio-time-row">
-          <span>{formatTime(currentTime)}</span>
-          <span>{formatTime(duration || audioRef.current?.duration)}</span>
-        </div>
-      </div>
-      <button className="audio-speed-btn" onClick={changeSpeed}>
-        {playbackRate}x
-      </button>
-    </div>
-  );
-}
+import { useTranslation } from "../context/TranslationContext";
+import Header from "../components/Header.jsx";
+import InterviewBar from "../components/InterviewBar.jsx";
 
 export default function DashboardIndependent() {
+  const { t } = useTranslation();
+
+  useEffect(() => {
+    window.onStartVideoCall = (url) => {
+      setJoiningVideoRoom(url);
+    };
+    return () => {
+      window.onStartVideoCall = null;
+    };
+  }, []);
+
+  const [user, setUser] = useState(null);
   const [userData, setUserData] = useState(null);
   const [myProjects, setMyProjects] = useState([]);
   const [allIndependentProjects, setAllIndependentProjects] = useState([]);
-  const [myApplications, setMyApplications] = useState([]); // applications I sent to others
-  const [receivedApplications, setReceivedApplications] = useState([]); // applications sent to my projects
+  const [myApplications, setMyApplications] = useState([]);
+  const [receivedApplications, setReceivedApplications] = useState([]);
   const [chats, setChats] = useState({});
   const [activeTab, setActiveTab] = useState("discover");
   const [activeChatId, setActiveChatId] = useState(null);
@@ -118,11 +35,16 @@ export default function DashboardIndependent() {
   const [loading, setLoading] = useState(true);
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
-  const [avatarUploading, setAvatarUploading] = useState(false);
   const [applyingTo, setApplyingTo] = useState(null);
   const [motivation, setMotivation] = useState("");
   const [cvFile, setCvFile] = useState(null);
   const [cvUploading, setCvUploading] = useState(false);
+  
+  const [businessChallenges, setBusinessChallenges] = useState([]);
+  const [joiningVideoRoom, setJoiningVideoRoom] = useState(null);
+
+  // Mobile sidebar state
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // New Project Form State
   const [projectForm, setProjectForm] = useState({
@@ -141,6 +63,26 @@ export default function DashboardIndependent() {
     localStorage.getItem("inspiro-theme") || "cosmic-dark"
   );
 
+  // Filters State
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterArea, setFilterArea] = useState("");
+  const [filterCommercial, setFilterCommercial] = useState(false);
+
+  const fileInputRef = useRef(null);
+  const chatBottomRef = useRef(null);
+  const navigate = useNavigate();
+
+  const getWarnings = () => {
+    if (!userData?.bio) return [];
+    try {
+      if (userData.bio.startsWith("{") && userData.bio.endsWith("}")) {
+        const parsed = JSON.parse(userData.bio);
+        return parsed.warnings || [];
+      }
+    } catch (e) {}
+    return [];
+  };
+
   const RESEARCH_AREAS = [
     "Machine Learning", "Биоинформатика", "Материаловедение",
     "Нейронауки", "Физика", "Химия", "Робототехника", "Data Science",
@@ -154,95 +96,110 @@ export default function DashboardIndependent() {
     { id: "sunset-glow", name: "🌅 Sunset Glow" },
   ];
 
-  // Filters State
-  const [searchQuery, setSearchQuery] = useState("");
-  const [filterArea, setFilterArea] = useState("");
-  const [filterNoExp, setFilterNoExp] = useState(false);
-  const [filterIntl, setFilterIntl] = useState(false);
-  const [filterCommercial, setFilterCommercial] = useState(false);
+  const fetchApps = async (userId, myProjIds) => {
+    // Fetch apps I sent
+    const { data: myApps } = await supabase
+      .from("applications")
+      .select("*")
+      .eq("student_id", userId);
+    setMyApplications(myApps || []);
 
-  const fileInputRef = useRef(null);
-  const chatBottomRef = useRef(null);
-  const navigate = useNavigate();
+    // Fetch received apps
+    if (myProjIds.length > 0) {
+      const { data: recApps } = await supabase
+        .from("applications")
+        .select("*")
+        .in("lab_id", myProjIds);
+      setReceivedApplications(recApps || []);
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
-      const user = auth.currentUser;
-      if (!user) return;
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) return navigate("/login");
+      setUser(currentUser);
 
       // 1. Fetch User Data
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      if (userDoc.exists()) {
-        const data = userDoc.data();
-        setUserData(data);
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", currentUser.id)
+        .single();
+
+      if (profile) {
+        setUserData(profile);
         setProfileForm({
-          name: data.name || "",
-          bio: data.bio || "",
-          github: data.github || "",
-          linkedin: data.linkedin || "",
-          skills: data.skills || "",
-          interests: data.interests || [],
+          name: profile.name || "",
+          bio: profile.bio || "",
+          github: profile.github || "",
+          linkedin: profile.linkedin || "",
+          skills: profile.skills || "",
+          interests: profile.interests || [],
         });
       }
 
       // 2. Fetch Independent Projects
-      const labsSnap = await getDocs(collection(db, "labs"));
-      const allLabs = labsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const { data: labsData } = await supabase.from("labs").select("*");
+      const allLabs = labsData || [];
 
-      // My created projects (where professorId/creatorId matches user uid AND isIndependent is true)
-      const myProjs = allLabs.filter(l => l.professorId === user.uid && l.isIndependent);
+      const myProjs = allLabs.filter(l => l.professor_id === currentUser.id && l.is_independent);
       setMyProjects(myProjs);
 
-      // Other independent projects
-      const otherInd = allLabs.filter(l => l.isIndependent && l.professorId !== user.uid);
+      const otherInd = allLabs.filter(l => l.is_independent && l.professor_id !== currentUser.id);
       setAllIndependentProjects(otherInd);
 
-      // 3. Fetch applications I sent
-      const myAppsSnap = await getDocs(
-        query(collection(db, "applications"), where("studentId", "==", user.uid))
-      );
-      setMyApplications(myAppsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // 3. Fetch applications
+      const myProjIds = myProjs.map(p => p.id);
+      await fetchApps(currentUser.id, myProjIds);
 
-      // 4. Fetch applications received for my projects
-      if (myProjs.length > 0) {
-        const myProjIds = myProjs.map(p => p.id);
-        const allAppsSnap = await getDocs(collection(db, "applications"));
-        const appsRec = allAppsSnap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .filter(a => myProjIds.includes(a.labId));
-        setReceivedApplications(appsRec);
-      }
+      // 4. Fetch Corporate Challenges
+      const { data: challenges } = await supabase.from("business_challenges").select("*");
+      setBusinessChallenges(challenges || []);
 
       setLoading(false);
     };
 
     fetchData();
-  }, []);
+  }, [navigate]);
+
+  // Fetch Messages helper
+  const fetchMessages = async (appId) => {
+    const { data: msgs } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("application_id", appId)
+      .order("created_at", { ascending: true });
+    
+    setChats(prev => ({
+      ...prev,
+      [appId]: msgs || []
+    }));
+    setTimeout(() => {
+      chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 80);
+  };
 
   // Chat listener
   useEffect(() => {
     if (!activeChatId) return;
 
-    const q = query(
-      collection(db, "chats", activeChatId, "messages"),
-      orderBy("createdAt", "asc")
-    );
+    fetchMessages(activeChatId);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map(d => ({
-        id: d.id,
-        ...d.data()
-      }));
-      setChats(prev => ({
-        ...prev,
-        [activeChatId]: msgs
-      }));
-      setTimeout(() => {
-        chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 80);
-    });
+    const subscription = supabase
+      .channel(`chat_${activeChatId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "messages", filter: `application_id=eq.${activeChatId}` },
+        () => {
+          fetchMessages(activeChatId);
+        }
+      )
+      .subscribe();
 
-    return () => unsubscribe();
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [activeChatId]);
 
   const handleThemeChange = (newTheme) => {
@@ -251,57 +208,44 @@ export default function DashboardIndependent() {
     localStorage.setItem("inspiro-theme", newTheme);
   };
 
-  const update = (field) => (e) => setProfileForm(p => ({ ...p, [field]: e.target.value }));
-
-  const handleAvatarUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setAvatarUploading(true);
-    try {
-      const storage = getStorage();
-      const storageRef = ref(storage, `avatars/${auth.currentUser.uid}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      await updateDoc(doc(db, "users", auth.currentUser.uid), { avatarUrl: url });
-      setUserData(prev => ({ ...prev, avatarUrl: url }));
-    } catch {
-      alert("Ошибка загрузки фото");
-    }
-    setAvatarUploading(false);
-  };
-
   const handleSaveProfile = async () => {
-    await updateDoc(doc(db, "users", auth.currentUser.uid), { ...profileForm });
+    await supabase.from("profiles").update({ ...profileForm }).eq("id", user.id);
     setUserData(prev => ({ ...prev, ...profileForm }));
     setEditingProfile(false);
   };
 
   const handleCreateProject = async () => {
+    const warnings = getWarnings();
+    if (warnings.some(w => w.level === "ban")) {
+      alert("Вы заблокированы администратором и не можете публиковать проекты.");
+      return;
+    }
     if (!projectForm.name || !projectForm.description) return alert("Заполните название и описание");
-    const user = auth.currentUser;
+    
     const newProjData = {
       name: projectForm.name,
       description: projectForm.description,
-      researchAreas: projectForm.researchAreas,
-      openSpots: Number(projectForm.openSpots),
+      research_areas: projectForm.researchAreas,
+      open_spots: Number(projectForm.openSpots),
       requirements: projectForm.requirements || "",
       challenges: projectForm.challenges || "",
-      howToApply: projectForm.howToApply || "",
-      isIndependent: true,
-      professorId: user.uid,
-      professorName: userData?.name || user.email,
-      noExperienceOk: true, // Independent researchers are usually open to beginners
-      internationalOk: true,
-      prepLevel: "beginner",
-      isCommercial: !!projectForm.isCommercial,
-      fundingNeeded: projectForm.isCommercial ? Number(projectForm.fundingNeeded || 0) : 0,
-      prototypeStatus: projectForm.isCommercial ? projectForm.prototypeStatus || "" : "",
-      marketPotential: projectForm.isCommercial ? projectForm.marketPotential || "" : "",
-      createdAt: serverTimestamp(),
+      how_to_apply: projectForm.howToApply || "",
+      is_independent: true,
+      professor_id: user.id,
+      professor_name: userData?.name || user.email,
+      no_experience_ok: true,
+      international_ok: true,
+      prep_level: "beginner",
+      is_commercial: !!projectForm.isCommercial,
+      funding_needed: projectForm.isCommercial ? Number(projectForm.fundingNeeded || 0) : 0,
+      prototype_status: projectForm.isCommercial ? projectForm.prototypeStatus || "" : "",
+      market_potential: projectForm.isCommercial ? projectForm.marketPotential || "" : "",
     };
 
-    const newProj = await addDoc(collection(db, "labs"), newProjData);
-    setMyProjects(prev => [...prev, { id: newProj.id, ...newProjData }]);
+    const { data: newProj } = await supabase.from("labs").insert(newProjData).select().single();
+    if (newProj) {
+      setMyProjects(prev => [...prev, newProj]);
+    }
     setShowProjectForm(false);
     setProjectForm({
       name: "", description: "", researchAreas: [], openSpots: 2,
@@ -312,39 +256,50 @@ export default function DashboardIndependent() {
 
   const handleDeleteProject = async (id) => {
     if (!window.confirm("Удалить этот проект?")) return;
-    await deleteDoc(doc(db, "labs", id));
+    await supabase.from("labs").delete().eq("id", id);
     setMyProjects(prev => prev.filter(p => p.id !== id));
   };
 
   const handleApply = async (proj) => {
+    const warnings = getWarnings();
+    if (warnings.some(w => w.level === "ban")) {
+      alert("Вы заблокированы администратором и не можете откликаться на проекты.");
+      return;
+    }
     if (!motivation.trim()) return alert("Напишите мотивационное письмо");
-    const user = auth.currentUser;
     setCvUploading(true);
     let cvUrl = null;
     if (cvFile) {
       try {
-        const storage = getStorage();
-        const storageRef = ref(storage, `cvs/${user.uid}_${proj.id}`);
-        await uploadBytes(storageRef, cvFile);
-        cvUrl = await getDownloadURL(storageRef);
-      } catch {
-        alert("Ошибка загрузки резюме");
+        const fileName = `${user.id}_${proj.id}_${Date.now()}_${cvFile.name}`;
+        const { error: uploadErr } = await supabase.storage
+          .from("cvs")
+          .upload(fileName, cvFile);
+
+        if (uploadErr) throw uploadErr;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from("cvs")
+          .getPublicUrl(fileName);
+        cvUrl = publicUrl;
+      } catch (err) {
+        alert("Ошибка загрузки резюме: " + err.message);
         setCvUploading(false);
         return;
       }
     }
 
-    await addDoc(collection(db, "applications"), {
-      studentId: user.uid,
-      studentName: userData?.name || user.email,
-      studentEmail: user.email,
-      labId: proj.id,
-      labName: proj.name,
-      professorId: proj.professorId,
+    await supabase.from("applications").insert({
+      student_id: user.id,
+      student_name: userData?.name || user.email,
+      student_email: user.email,
+      lab_id: proj.id,
+      lab_name: proj.name,
+      professor_id: proj.professor_id,
       motivation,
-      cvUrl,
+      cv_url: cvUrl,
       status: "pending",
-      createdAt: serverTimestamp(),
+      timeline_data: [{ status: "pending", date: new Date().toLocaleDateString("ru"), note: "Предложено соавторство." }]
     });
 
     setApplyingTo(null);
@@ -352,31 +307,45 @@ export default function DashboardIndependent() {
     setCvFile(null);
     setCvUploading(false);
 
-    const appsSnap = await getDocs(
-      query(collection(db, "applications"), where("studentId", "==", user.uid))
-    );
-    setMyApplications(appsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const myProjIds = myProjects.map(p => p.id);
+    await fetchApps(user.id, myProjIds);
   };
 
   const handleStatus = async (appId, status) => {
-    await updateDoc(doc(db, "applications", appId), { status });
-    setReceivedApplications(prev => prev.map(a => a.id === appId ? { ...a, status } : a));
+    const matchedApp = receivedApplications.find(a => a.id === appId);
+    if (!matchedApp) return;
+
+    const timeline = matchedApp.timeline_data || [];
+    const notes = {
+      accepted: "Соавтор принят в проект!",
+      rejected: "Кандидатура соавтора отклонена.",
+      interview: "Автор проекта назначил созвон для обсуждения."
+    };
+    const updatedTimeline = [
+      ...timeline,
+      { status, date: new Date().toLocaleDateString("ru"), note: notes[status] || "Статус обновлен" }
+    ];
+
+    await supabase.from("applications").update({ status, timeline_data: updatedTimeline }).eq("id", appId);
+    const myProjIds = myProjects.map(p => p.id);
+    await fetchApps(user.id, myProjIds);
   };
 
   const handleSendMessage = async (appId) => {
     if (!chatMessage.trim()) return;
-    const user = auth.currentUser;
     const textToSend = chatMessage;
     setChatMessage("");
 
-    await addDoc(collection(db, "chats", appId, "messages"), {
+    await supabase.from("messages").insert({
+      application_id: appId,
       text: textToSend,
-      senderId: user.uid,
-      senderName: userData?.name || "Исследователь",
-      senderRole: "independent",
-      createdAt: serverTimestamp(),
+      sender_id: user.id,
+      sender_name: userData?.name || "Исследователь",
+      sender_role: "independent",
     });
   };
+
+  const update = (field) => (e) => setProfileForm(p => ({ ...p, [field]: e.target.value }));
 
   const toggleArea = (area) => {
     setProjectForm(prev => ({
@@ -384,15 +353,6 @@ export default function DashboardIndependent() {
       researchAreas: prev.researchAreas.includes(area)
         ? prev.researchAreas.filter(a => a !== area)
         : [...prev.researchAreas, area]
-    }));
-  };
-
-  const toggleInterest = (area) => {
-    setProfileForm(prev => ({
-      ...prev,
-      interests: prev.interests.includes(area)
-        ? prev.interests.filter(i => i !== area)
-        : [...prev.interests, area]
     }));
   };
 
@@ -407,8 +367,8 @@ export default function DashboardIndependent() {
   // Filters logic
   const filteredProjects = allIndependentProjects.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesArea = !filterArea || p.researchAreas?.includes(filterArea);
-    const matchesComm = !filterCommercial || p.isCommercial;
+    const matchesArea = !filterArea || p.research_areas?.includes(filterArea);
+    const matchesComm = !filterCommercial || p.is_commercial;
     return matchesSearch && matchesArea && matchesComm;
   });
 
@@ -419,13 +379,22 @@ export default function DashboardIndependent() {
 
   return (
     <div className="dashboard">
+      
+      {/* Mobile Header */}
+      <header className="mobile-header" style={{ display: "none" }}>
+        <button className="menu-toggle-btn" onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}>
+          ☰ Меню
+        </button>
+        <span className="land-logo" style={{ fontSize: 18, fontWeight: "bold" }}>inspirosk</span>
+      </header>
+
       {/* Sidebar */}
-      <aside className="dash-sidebar">
+      <aside className={`dash-sidebar ${mobileSidebarOpen ? "mobile-open" : ""}`}>
         <div className="dash-logo">inspirosk</div>
 
         <div className="dash-user">
-          <div className="dash-avatar" style={userData?.avatarUrl ? { padding: 0, overflow: "hidden" } : {}}>
-            {userData?.avatarUrl ? <img src={userData.avatarUrl} alt="avatar" /> : initials}
+          <div className="dash-avatar" style={userData?.avatar_url ? { padding: 0, overflow: "hidden" } : {}}>
+            {userData?.avatar_url ? <img src={userData.avatar_url} alt="avatar" /> : initials}
           </div>
           <div>
             <div className="dash-username">{userData?.name || "Исследователь"}</div>
@@ -442,28 +411,151 @@ export default function DashboardIndependent() {
 
         <nav className="dash-nav">
           {[
-            ["discover", "🔍 Искать соавторов", filteredProjects.length],
-            ["my-projects", "💡 Мои проекты", myProjects.length],
-            ["requests", "📥 Заявки в проекты", receivedApplications.filter(a => a.status === "pending").length],
-            ["applications", "📤 Отправленные", myApplications.length],
-            ["chat", "💬 Обсуждения", chatApps.length],
-            ["profile", "👤 Профиль", 0],
-            ["knowledge-hub", "📚 База знаний", 0],
+            ["discover", "🔍 " + t("nav.discover"), filteredProjects.length],
+            ["my-projects", "💡 " + t("nav.my_projects"), myProjects.length],
+            ["requests", "📥 " + t("nav.applications") + " (In)", receivedApplications.filter(a => a.status === "pending").length],
+            ["applications", "📤 " + t("nav.my_applications"), myApplications.length],
+            ["interview", "🎯 " + t("nav.interviews"), [
+              ...myApplications.filter(a => a.status === "interview"),
+              ...receivedApplications.filter(a => a.status === "interview")
+            ].length],
+            ["business-challenges", "💼 " + t("nav.challenges"), businessChallenges.length],
+            ["chat", "💬 " + t("nav.chats"), chatApps.length],
+            ["profile", "👤 " + t("common.profile"), 0],
           ].map(([tab, label, count]) => (
-            <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => { setActiveTab(tab); if(tab === "chat" && chatApps.length > 0) setActiveChatId(chatApps[0].id); }}>
+            <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => { setActiveTab(tab); setMobileSidebarOpen(false); if(tab === "chat" && chatApps.length > 0) setActiveChatId(chatApps[0].id); }}>
               {label}
               {count > 0 && <span className="badge">{count}</span>}
             </button>
           ))}
         </nav>
 
-        <button className="dash-logout" onClick={() => { signOut(auth); navigate("/login"); }}>
+        <button className="dash-logout" onClick={() => { supabase.auth.signOut(); navigate("/login"); }}>
           <LogOut size={16} /> Выйти
         </button>
       </aside>
 
       {/* Main Content */}
       <main className="dash-main">
+        <Header userProfile={userData} onOpenSettings={() => setActiveTab("profile")} />
+
+        {getWarnings().map((w, idx) => (
+          <div key={idx} style={{ 
+            margin: "16px 32px 0 32px", 
+            padding: "12px 18px", 
+            borderRadius: 12, 
+            background: w.level === "ban" ? "rgba(239,68,68,0.15)" : w.level === "warning" ? "rgba(245,158,11,0.15)" : "rgba(59,130,246,0.15)",
+            border: `1px solid ${w.level === "ban" ? "var(--status-rejected)" : w.level === "warning" ? "var(--status-pending)" : "var(--primary)"}`,
+            color: "var(--text-primary)",
+            display: "flex",
+            alignItems: "center",
+            gap: 12
+          }}>
+            <ShieldAlert size={20} style={{ color: w.level === "ban" ? "var(--status-rejected)" : w.level === "warning" ? "var(--status-pending)" : "var(--primary)", flexShrink: 0 }} />
+            <div>
+              <strong style={{ textTransform: "uppercase", fontSize: 12, display: "block" }}>
+                Системное предупреждение: {w.level === "ban" ? "БАН" : w.level === "warning" ? "ПРЕДУПРЕЖДЕНИЕ" : "ИНФО"}
+              </strong>
+              <span style={{ fontSize: 13 }}>{w.text}</span>
+            </div>
+          </div>
+        ))}
+
+        {/* ── ИНТЕРВЬЮ ── */}
+        {activeTab === "interview" && (
+          <div className="dash-content">
+            <h1>{t("nav.interviews")}</h1>
+            <p className="dash-subtitle">Управление расписанием собеседований</p>
+            {[
+              ...myApplications.filter(a => a.status === "interview"),
+              ...receivedApplications.filter(a => a.status === "interview")
+            ].length === 0 ? (
+              <div className="empty-state">
+                <Video size={32} />
+                У вас нет активных собеседований.
+              </div>
+            ) : (
+              <div className="labs-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))" }}>
+                {[
+                  ...myApplications.filter(a => a.status === "interview"),
+                  ...receivedApplications.filter(a => a.status === "interview")
+                ].map(app => {
+                  const isIncoming = app.professor_id === user.id;
+                  return (
+                    <div className="lab-card" key={app.id} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                      <div>
+                        <h3 style={{ margin: "0 0 4px 0" }}>{app.lab_name}</h3>
+                        <p style={{ margin: 0, fontSize: 13, color: "var(--primary-light)" }}>
+                          {isIncoming ? `Кандидат: ${app.student_name}` : `Автор проекта: ${app.student_name}`}
+                        </p>
+                      </div>
+                      <div style={{ borderTop: "1px solid var(--border-color)", paddingTop: 14 }}>
+                        <InterviewBar 
+                          application={app} 
+                          currentUserRole={isIncoming ? "professor" : "student"} 
+                          onUpdate={async () => {
+                            const myProjIds = myProjects.map(p => p.id);
+                            await fetchApps(user.id, myProjIds);
+                          }} 
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── ЗАПРОСЫ БИЗНЕСА ── */}
+        {activeTab === "business-challenges" && (
+          <div className="dash-content">
+            <h1>Запросы бизнеса (R&D)</h1>
+            <p className="dash-subtitle">Научно-прикладные проблемы предприятий Казахстана, требующие решения</p>
+            {businessChallenges.length === 0 ? (
+              <div className="empty-state"><Briefcase size={32} />Запросов от компаний пока нет.</div>
+            ) : (
+              <div className="labs-grid">
+                {businessChallenges.map(ch => (
+                  <div className="lab-card" key={ch.id} style={{ borderLeft: "4px solid var(--status-pending)", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <h3>{ch.title}</h3>
+                        <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)" }}>$ {ch.budget?.toLocaleString()}</span>
+                      </div>
+                      <p style={{ fontSize: 13, color: "var(--primary-light)", margin: "4px 0" }}>🏢 Компания: {ch.company_name}</p>
+                      <p className="lab-desc">{ch.description}</p>
+                      <div style={{ background: "var(--input-bg)", padding: 10, borderRadius: 8, margin: "10px 0", fontSize: 12 }}>
+                        <p style={{ margin: "2px 0" }}>⏳ <strong>Дедлайн:</strong> {ch.deadline || "Не ограничен"}</p>
+                        <p style={{ margin: "2px 0" }}>🔬 <strong>Направление:</strong> {ch.research_area}</p>
+                      </div>
+                    </div>
+                    <button className="btn-apply" onClick={async () => {
+                      const coopData = {
+                        student_id: ch.company_id,
+                        student_name: ch.company_name,
+                        student_email: "",
+                        lab_id: ch.id,
+                        lab_name: `R&D: ${ch.title}`,
+                        professor_id: user.id,
+                        motivation: `Как независимый ученый, я заинтересован в решении вашей R&D задачи: "${ch.title}". Готов обсудить соавторство/контракт.`,
+                        status: "accepted", 
+                        timeline_data: [{ status: "accepted", date: new Date().toLocaleDateString("ru"), note: "Сотрудничество по R&D начато." }]
+                      };
+                      await supabase.from("applications").insert(coopData);
+                      const myProjIds = myProjects.map(p => p.id);
+                      await fetchApps(user.id, myProjIds);
+                      alert("Сотрудничество инициировано! Перейдите во вкладку 'Чат' для связи.");
+                      setActiveTab("chat");
+                    }}>
+                      Предложить решение / Написать
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Tab 1: Discover Projects */}
         {activeTab === "discover" && (
@@ -497,24 +589,24 @@ export default function DashboardIndependent() {
 
             <div className="labs-grid">
               {filteredProjects.map(proj => {
-                const applied = myApplications.find(a => a.labId === proj.id);
+                const applied = myApplications.find(a => a.lab_id === proj.id);
                 return (
-                  <div className="lab-card" key={proj.id} style={{ borderLeft: proj.isCommercial ? "4px solid var(--status-pending)" : "1px solid var(--border-color)" }}>
+                  <div className="lab-card" key={proj.id} style={{ borderLeft: proj.is_commercial ? "4px solid var(--status-pending)" : "1px solid var(--border-color)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <h3>{proj.name}</h3>
-                      {proj.isCommercial && <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)" }}>💰 Коммерческий</span>}
+                      {proj.is_commercial && <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)" }}>💰 Коммерческий</span>}
                     </div>
-                    <p style={{ fontSize: 13, color: "var(--primary-light)", margin: "4px 0" }}>👤 Автор: {proj.professorName}</p>
+                    <p style={{ fontSize: 13, color: "var(--primary-light)", margin: "4px 0" }}>👤 Автор: {proj.professor_name}</p>
                     <p className="lab-desc">{proj.description}</p>
                     {proj.requirements && <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "8px 0 0 0" }}>📋 Требуемые соавторы: {proj.requirements}</p>}
                     {proj.challenges && <p style={{ fontSize: 12, color: "var(--status-rejected)", margin: "4px 0 0 0" }}>⚠️ Сложности: {proj.challenges}</p>}
                     
                     <div className="lab-tags" style={{ marginTop: 10 }}>
-                      {proj.researchAreas?.map(a => <span key={a} className="tag">{a}</span>)}
+                      {proj.research_areas?.map(a => <span key={a} className="tag">{a}</span>)}
                     </div>
 
                     <div className="lab-footer" style={{ marginTop: 15 }}>
-                      <span>Ищет соавторов: {proj.openSpots || 2}</span>
+                      <span>Ищет соавторов: {proj.open_spots || 2}</span>
                       {applied ? (
                         <span className={`status-badge ${statusClass(applied.status)}`}>{statusLabel(applied.status)}</span>
                       ) : (
@@ -534,7 +626,7 @@ export default function DashboardIndependent() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <div>
                 <h1>Мои исследовательские проекты</h1>
-                <p className="dash-subtitle">Создавайте свои работы и ищите заинтересованных соавторов</p>
+                <p className="dash-subtitle">Создавайте свои работы и ищите соавторов</p>
               </div>
               <button className="btn-apply" style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={() => setShowProjectForm(!showProjectForm)}>
                 <Plus size={16} /> Создать проект
@@ -547,22 +639,22 @@ export default function DashboardIndependent() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 15 }}>
                   <div className="field-group">
                     <label>Название проекта</label>
-                    <input type="text" placeholder="Пример: Разработка децентрализованной энергосети" value={projectForm.name} onChange={e => setProjectForm({...projectForm, name: e.target.value})} />
+                    <input type="text" placeholder="Название..." value={projectForm.name} onChange={e => setProjectForm({...projectForm, name: e.target.value})} />
                   </div>
                   <div className="field-group">
-                    <label>Описание идеи и методологии</label>
-                    <textarea placeholder="Опишите гипотезу, цели работы..." value={projectForm.description} onChange={e => setProjectForm({...projectForm, description: e.target.value})} rows={4} />
+                    <label>Описание идеи</label>
+                    <textarea placeholder="Опишите гипотезу..." value={projectForm.description} onChange={e => setProjectForm({...projectForm, description: e.target.value})} rows={4} />
                   </div>
                   <div className="field-group">
-                    <label>Кого вы ищете (Навыки / Задачи соавтора)</label>
-                    <input type="text" placeholder="Пример: Frontend-разработчик со знанием D3.js для визуализации" value={projectForm.requirements} onChange={e => setProjectForm({...projectForm, requirements: e.target.value})} />
+                    <label>Кого вы ищете (Навыки)</label>
+                    <input type="text" placeholder="Пример: Frontend-разработчик" value={projectForm.requirements} onChange={e => setProjectForm({...projectForm, requirements: e.target.value})} />
                   </div>
                   <div className="field-group">
-                    <label>Сложности и вызовы проекта (Будьте честны о нагрузке)</label>
-                    <input type="text" placeholder="Пример: Ограниченные ресурсы вычислений, сложный математический аппарат" value={projectForm.challenges} onChange={e => setProjectForm({...projectForm, challenges: e.target.value})} />
+                    <label>Сложности (Будьте честны)</label>
+                    <input type="text" placeholder="Сложности..." value={projectForm.challenges} onChange={e => setProjectForm({...projectForm, challenges: e.target.value})} />
                   </div>
                   <div className="field-group">
-                    <label>Направления исследований</label>
+                    <label>Направления</label>
                     <div className="chips">
                       {RESEARCH_AREAS.map(a => (
                         <button key={a} type="button" className={`chip ${projectForm.researchAreas.includes(a) ? "active" : ""}`} onClick={() => toggleArea(a)}>{a}</button>
@@ -574,11 +666,10 @@ export default function DashboardIndependent() {
                     <input type="number" min="1" value={projectForm.openSpots} onChange={e => setProjectForm({...projectForm, openSpots: e.target.value})} />
                   </div>
 
-                  <div className="field-group" style={{ display: "flex", gap: 10, alignItems: "center", border: "1px solid var(--border-color)", padding: 12, borderRadius: 8, background: "var(--card-hover-bg)" }}>
+                  <div className="field-group" style={{ display: "flex", gap: 10, alignItems: "center", border: "1px solid var(--border-color)", padding: 12, borderRadius: 8 }}>
                     <input type="checkbox" checked={projectForm.isCommercial} onChange={e => setProjectForm({...projectForm, isCommercial: e.target.checked})} />
                     <div>
                       <label style={{ margin: 0, fontWeight: "bold" }}>Проект имеет коммерческую ценность</label>
-                      <p style={{ margin: 0, fontSize: 11, color: "var(--text-muted)" }}>Позволит инвесторам и компаниям найти ваш проект в маркете</p>
                     </div>
                   </div>
 
@@ -586,15 +677,15 @@ export default function DashboardIndependent() {
                     <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingLeft: 16, borderLeft: "2px solid var(--status-pending)" }}>
                       <div className="field-group">
                         <label>Необходимое финансирование ($)</label>
-                        <input type="number" placeholder="Пример: 15000" value={projectForm.fundingNeeded} onChange={e => setProjectForm({...projectForm, fundingNeeded: e.target.value})} />
+                        <input type="number" value={projectForm.fundingNeeded} onChange={e => setProjectForm({...projectForm, fundingNeeded: e.target.value})} />
                       </div>
                       <div className="field-group">
                         <label>Статус прототипа</label>
-                        <input type="text" placeholder="Пример: MVP готов / Математическая модель / Альфа-версия" value={projectForm.prototypeStatus} onChange={e => setProjectForm({...projectForm, prototypeStatus: e.target.value})} />
+                        <input type="text" value={projectForm.prototypeStatus} onChange={e => setProjectForm({...projectForm, prototypeStatus: e.target.value})} />
                       </div>
                       <div className="field-group">
                         <label>Описание рыночного потенциала</label>
-                        <textarea placeholder="Какую проблему решает продукт на рынке?" value={projectForm.marketPotential} onChange={e => setProjectForm({...projectForm, marketPotential: e.target.value})} rows={2} />
+                        <textarea value={projectForm.marketPotential} onChange={e => setProjectForm({...projectForm, marketPotential: e.target.value})} rows={2} />
                       </div>
                     </div>
                   )}
@@ -611,20 +702,20 @@ export default function DashboardIndependent() {
 
             <div className="labs-grid">
               {myProjects.map(proj => (
-                <div className="lab-card" key={proj.id} style={{ borderLeft: proj.isCommercial ? "4px solid var(--status-pending)" : "1px solid var(--border-color)" }}>
+                <div className="lab-card" key={proj.id} style={{ borderLeft: proj.is_commercial ? "4px solid var(--status-pending)" : "1px solid var(--border-color)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <h3>{proj.name}</h3>
-                    <button className="btn-secondary" style={{ padding: "4px 8px", fontSize: 11, background: "var(--status-rejected-bg)", color: "var(--status-rejected)" }} onClick={() => handleDeleteProject(proj.id)}>Удалить</button>
+                    <button className="btn-secondary" style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-rejected)" }} onClick={() => handleDeleteProject(proj.id)}>Удалить</button>
                   </div>
                   <p className="lab-desc">{proj.description}</p>
-                  {proj.isCommercial && (
+                  {proj.is_commercial && (
                     <div style={{ background: "var(--input-bg)", padding: 10, borderRadius: 8, margin: "10px 0", fontSize: 12 }}>
-                      <p style={{ margin: "2px 0" }}>💰 <strong>Бюджет:</strong> ${proj.fundingNeeded}</p>
-                      <p style={{ margin: "2px 0" }}>🛠 <strong>Прототип:</strong> {proj.prototypeStatus}</p>
+                      <p style={{ margin: "2px 0" }}>💰 <strong>Бюджет:</strong> ${proj.funding_needed}</p>
+                      <p style={{ margin: "2px 0" }}>🛠 <strong>Прототип:</strong> {proj.prototype_status}</p>
                     </div>
                   )}
                   <div className="lab-tags">
-                    {proj.researchAreas?.map(a => <span key={a} className="tag">{a}</span>)}
+                    {proj.research_areas?.map(a => <span key={a} className="tag">{a}</span>)}
                   </div>
                 </div>
               ))}
@@ -632,7 +723,7 @@ export default function DashboardIndependent() {
           </div>
         )}
 
-        {/* Tab 3: Received Applications (Co-author requests) */}
+        {/* Tab 3: Received Applications */}
         {activeTab === "requests" && (
           <div className="dash-content">
             <h1>Заявки в ваши проекты</h1>
@@ -645,16 +736,16 @@ export default function DashboardIndependent() {
                 <div className="lab-card" key={app.id} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
-                      <h3 style={{ margin: 0 }}>{app.studentName}</h3>
-                      <p style={{ margin: 0, fontSize: 12, color: "var(--primary-light)" }}>Проект: {app.labName}</p>
+                      <h3 style={{ margin: 0 }}>{app.student_name}</h3>
+                      <p style={{ margin: 0, fontSize: 12, color: "var(--primary-light)" }}>Проект: {app.lab_name}</p>
                     </div>
                     <span className={`status-badge ${statusClass(app.status)}`}>{statusLabel(app.status)}</span>
                   </div>
                   <p style={{ fontSize: 13, background: "var(--input-bg)", padding: 12, borderRadius: 8 }}>
                     <strong>Мотивация:</strong> {app.motivation}
                   </p>
-                  {app.cvUrl && (
-                    <a href={app.cvUrl} target="_blank" rel="noreferrer" className="btn-secondary" style={{ width: "fit-content", display: "flex", alignItems: "center", gap: 6, textDecoration: "none" }}>
+                  {app.cv_url && (
+                    <a href={app.cv_url} target="_blank" rel="noreferrer" className="btn-secondary" style={{ width: "fit-content", display: "flex", alignItems: "center", gap: 6, textDecoration: "none" }}>
                       <FileText size={14} /> Открыть резюме
                     </a>
                   )}
@@ -684,8 +775,8 @@ export default function DashboardIndependent() {
               {myApplications.map(app => (
                 <div className="lab-card" key={app.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
-                    <h3>{app.labName}</h3>
-                    <p style={{ margin: "4px 0 0 0", fontSize: 12, color: "var(--text-muted)" }}>Подано: {app.createdAt?.toDate ? app.createdAt.toDate().toLocaleDateString() : "Недавно"}</p>
+                    <h3>{app.lab_name}</h3>
+                    <p style={{ margin: "4px 0 0 0", fontSize: 12, color: "var(--text-muted)" }}>Подано: {new Date(app.created_at).toLocaleDateString("ru")}</p>
                   </div>
                   <span className={`status-badge ${statusClass(app.status)}`}>{statusLabel(app.status)}</span>
                 </div>
@@ -694,7 +785,7 @@ export default function DashboardIndependent() {
           </div>
         )}
 
-        {/* Tab 5: Chat & Communication */}
+        {/* Tab 5: Chat */}
         {activeTab === "chat" && (
           <div className="dash-content chat-tab-container" style={{ height: "calc(100vh - 120px)" }}>
             <h1>Обсуждения</h1>
@@ -702,12 +793,12 @@ export default function DashboardIndependent() {
               {/* Chat sidebar */}
               <div className="chat-list-sidebar" style={{ width: 250, borderRight: "1px solid var(--border-color)" }}>
                 {chatApps.length === 0 ? (
-                  <p style={{ padding: 15, fontSize: 12, color: "var(--text-muted)" }}>Нет активных чатов. Чаты открываются при принятии заявок.</p>
+                  <p style={{ padding: 15, fontSize: 12, color: "var(--text-muted)" }}>Нет чатов.</p>
                 ) : (
                   chatApps.map(app => (
                     <div key={app.id} className={`chat-item-node ${activeChatId === app.id ? "active-node" : ""}`} onClick={() => setActiveChatId(app.id)} style={{ padding: 12, cursor: "pointer", borderBottom: "1px solid var(--border-color)", background: activeChatId === app.id ? "var(--primary-glow)" : "transparent" }}>
-                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13 }}>{app.labName}</p>
-                      <p style={{ margin: "2px 0 0 0", fontSize: 11, color: "var(--text-muted)" }}>{app.studentName === userData?.name ? "Владелец" : app.studentName}</p>
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13 }}>{app.lab_name}</p>
+                      <p style={{ margin: "2px 0 0 0", fontSize: 11, color: "var(--text-muted)" }}>{app.student_name}</p>
                     </div>
                   ))
                 )}
@@ -718,17 +809,15 @@ export default function DashboardIndependent() {
                 {activeChatId && activeChatApp ? (
                   <>
                     <div className="chat-header" style={{ padding: 12, borderBottom: "1px solid var(--border-color)", background: "var(--dash-card)" }}>
-                      <h4 style={{ margin: 0 }}>{activeChatApp.labName}</h4>
-                      <p style={{ margin: 0, fontSize: 11, color: "var(--text-muted)" }}>
-                        Чат между {activeChatApp.studentName} и {activeChatApp.studentEmail}
-                      </p>
+                      <h4 style={{ margin: 0 }}>{activeChatApp.lab_name}</h4>
+                      <p style={{ margin: 0, fontSize: 11, color: "var(--text-muted)" }}>Чат участников проекта</p>
                     </div>
                     <div className="chat-messages-container" style={{ flex: 1, padding: 15, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
-                      {chats[activeChatId]?.map(msg => {
-                        const isMe = msg.senderId === auth.currentUser.uid;
+                      {(chats[activeChatId] || []).map(msg => {
+                        const isMe = msg.sender_id === user.id;
                         return (
                           <div key={msg.id} style={{ alignSelf: isMe ? "flex-end" : "flex-start", background: isMe ? "var(--primary)" : "var(--dash-card)", padding: "10px 14px", borderRadius: 12, maxWidth: "60%" }}>
-                            <p style={{ margin: 0, fontSize: 11, fontWeight: "bold", color: isMe ? "#fff" : "var(--primary-light)" }}>{msg.senderName}</p>
+                            <p style={{ margin: 0, fontSize: 11, fontWeight: "bold", color: isMe ? "#fff" : "var(--primary-light)" }}>{msg.sender_name}</p>
                             <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "#fff" }}>{msg.text}</p>
                           </div>
                         );
@@ -752,7 +841,7 @@ export default function DashboardIndependent() {
         {activeTab === "profile" && (
           <div className="dash-content">
             <h1>Мой профиль</h1>
-            <p className="dash-subtitle">Управляйте вашим резюме и профессиональными интересами</p>
+            <p className="dash-subtitle">Личные настройки соавтора</p>
 
             <div className="lab-card" style={{ padding: 24 }}>
               {editingProfile ? (
@@ -762,7 +851,7 @@ export default function DashboardIndependent() {
                     <input type="text" value={profileForm.name} onChange={update("name")} />
                   </div>
                   <div className="field-group">
-                    <label>О себе / Опыт</label>
+                    <label>О себе</label>
                     <textarea value={profileForm.bio} onChange={update("bio")} rows={3} />
                   </div>
                   <div className="field-group">
@@ -774,8 +863,8 @@ export default function DashboardIndependent() {
                     <input type="text" value={profileForm.linkedin} onChange={update("linkedin")} />
                   </div>
                   <div className="field-group">
-                    <label>Навыки (через запятую)</label>
-                    <input type="text" value={profileForm.skills} onChange={update("skills")} placeholder="Python, React, Data Analysis" />
+                    <label>Навыки</label>
+                    <input type="text" value={profileForm.skills} onChange={update("skills")} />
                   </div>
                   <div style={{ display: "flex", gap: 10 }}>
                     <button className="btn-apply" onClick={handleSaveProfile}>Сохранить</button>
@@ -788,9 +877,9 @@ export default function DashboardIndependent() {
                   <p style={{ color: "var(--primary-light)" }}>Независимый исследователь</p>
                   <p>{userData?.bio || "О себе не заполнено."}</p>
                   <hr style={{ borderColor: "var(--border-color)", margin: "15px 0" }} />
-                  <p><strong>GitHub:</strong> {userData?.github ? <a href={userData.github} target="_blank" rel="noreferrer">{userData.github}</a> : "не привязан"}</p>
-                  <p><strong>LinkedIn:</strong> {userData?.linkedin ? <a href={userData.linkedin} target="_blank" rel="noreferrer">{userData.linkedin}</a> : "не привязан"}</p>
-                  <p><strong>Навыки:</strong> {userData?.skills || "не заполнены"}</p>
+                  <p><strong>GitHub:</strong> {userData?.github}</p>
+                  <p><strong>LinkedIn:</strong> {userData?.linkedin}</p>
+                  <p><strong>Навыки:</strong> {userData?.skills}</p>
                   <button className="btn-apply" style={{ marginTop: 15 }} onClick={() => setEditingProfile(true)}>Редактировать</button>
                 </div>
               )}
@@ -801,77 +890,57 @@ export default function DashboardIndependent() {
         {/* Tab 7: Knowledge Hub */}
         {activeTab === "knowledge-hub" && (
           <div className="dash-content">
-            <h1>📚 База Знаний (Knowledge Hub)</h1>
-            <p className="dash-subtitle">Всё, что вам нужно знать для старта независимого научного проекта</p>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-              <div className="lab-card" style={{ padding: 20 }}>
-                <h3 style={{ color: "var(--primary-light)" }}>🔬 С чего начать исследование?</h3>
-                <p style={{ fontSize: 14 }}>
-                  Любая научная работа начинается с <strong>формулирования гипотезы</strong>. Прежде чем писать код или собирать данные:
-                </p>
-                <ol style={{ fontSize: 14, paddingLeft: 20, margin: "10px 0" }}>
-                  <li>Сделайте <em>Literature Review</em> — найдите 5-10 свежих статей по теме в Google Scholar.</li>
-                  <li>Опишите <em>Research Question</em> — какую именно нерешенную задачу вы хотите рассмотреть?</li>
-                  <li>Определите <em>Methodology</em> — какие методы и инструменты вам понадобятся.</li>
-                </ol>
-              </div>
-
-              <div className="lab-card" style={{ padding: 20 }}>
-                <h3 style={{ color: "var(--status-pending)" }}>📝 Как привлечь соавторов в проект?</h3>
-                <p style={{ fontSize: 14 }}>
-                  Соавторам должно быть понятно, в чем заключается их роль. При создании проекта укажите:
-                </p>
-                <ul style={{ fontSize: 14, paddingLeft: 20, margin: "10px 0" }}>
-                  <li>Конкретные навыки (например, "нужен человек для проведения опросов" или "ML-инженер для обучения модели").</li>
-                  <li>Планируемый результат (публикация на arXiv, участие в конференции или создание коммерческого стартапа).</li>
-                  <li>Честно опишите <strong>вызовы и сложности</strong>: сколько времени нужно уделять проекту каждую неделю.</li>
-                </ul>
-              </div>
-
-              <div className="lab-card" style={{ padding: 20 }}>
-                <h3 style={{ color: "var(--status-accepted)" }}>💵 Коммерциализация вашей работы</h3>
-                <p style={{ fontSize: 14 }}>
-                  Если ваша разработка имеет прикладную пользу (например, новый софт, девайс или алгоритм оптимизации), вы можете пометить проект как <strong>коммерческий</strong>. Это откроет его для инвесторов и бизнес-партнеров на платформе, которые смогут предложить финансирование или пилотное внедрение.
-                </p>
-              </div>
+            <h1>📚 База Знаний</h1>
+            <p className="dash-subtitle">Руководство по запуску независимого исследования</p>
+            <div className="lab-card" style={{ padding: 20 }}>
+              <h3>Как привлечь соавторов?</h3>
+              <p>Четко формулируйте задачи и цели работы. Описывайте ожидаемый вклад соавтора.</p>
             </div>
           </div>
         )}
 
       </main>
 
-      {/* Proposal Modal */}
+      {/* Application Modal */}
       {applyingTo && (
         <div className="lightbox-overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center", position: "fixed", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.8)", zIndex: 100 }}>
           <div className="lab-card" style={{ width: "500px", padding: 24 }}>
             <h2>Предложение соавторства</h2>
-            <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Проект: {applyingTo.name}</p>
+            <p>Проект: {applyingTo.name}</p>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 15 }}>
-              <div className="field-group">
-                <label>Расскажите о себе и вашем опыте в этой сфере</label>
-                <textarea
-                  value={motivation}
-                  onChange={e => setMotivation(e.target.value)}
-                  placeholder="Почему вас интересует этот проект? Какую часть работы вы готовы взять на себя?"
-                  rows={4}
-                  required
-                />
-              </div>
-
-              <div className="field-group">
-                <label>Прикрепить резюме / CV (необязательно)</label>
-                <input type="file" onChange={e => setCvFile(e.target.files[0])} />
-              </div>
-
+              <textarea
+                value={motivation}
+                onChange={e => setMotivation(e.target.value)}
+                placeholder="Расскажите о своем опыте и видении..."
+                rows={4}
+                required
+              />
+              <input type="file" onChange={e => setCvFile(e.target.files[0])} />
               <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
                 <button className="btn-apply" onClick={() => handleApply(applyingTo)} disabled={cvUploading}>
-                  {cvUploading ? "Отправка..." : "Отправить заявку"}
+                  {cvUploading ? "Отправка..." : "Отправить"}
                 </button>
-                <button className="btn-secondary" onClick={() => { setApplyingTo(null); setMotivation(""); setCvFile(null); }}>Отмена</button>
+                <button className="btn-secondary" onClick={() => setApplyingTo(null)}>Отмена</button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+      {/* ── Daily.co Video Interview Iframe Modal ── */}
+      {joiningVideoRoom && (
+        <div className="modal-overlay" onClick={() => setJoiningVideoRoom(null)}>
+          <div className="modal" style={{ maxWidth: 800, width: "95%", height: "600px", padding: 20 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-color)", paddingBottom: 10, marginBottom: 15 }}>
+              <h3 style={{ margin: 0 }}>🎥 Видео-интервью Daily.co</h3>
+              <button className="btn-secondary" onClick={() => setJoiningVideoRoom(null)} style={{ padding: "4px 8px" }}>Выйти</button>
+            </div>
+            <iframe 
+              title="Видео-интервью Daily.co"
+              src={joiningVideoRoom} 
+              allow="camera; microphone; fullscreen; display-capture; autoplay" 
+              style={{ width: "100%", height: "480px", border: "none", borderRadius: 12 }} 
+            />
           </div>
         </div>
       )}

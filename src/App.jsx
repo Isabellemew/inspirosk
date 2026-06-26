@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "./firebase.js";
+import { supabase } from "./supabaseClient.js";
 
 import Login from "./pages/Login.jsx";
 import RegisterStudent from "./pages/Registerstudent.jsx";
@@ -19,8 +18,15 @@ import Landing from "./pages/Landing.jsx";
 function PrivateRoute({ children }) {
   const [user, setUser] = useState(undefined);
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUser(u));
-    return unsub;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   if (user === undefined) return null;

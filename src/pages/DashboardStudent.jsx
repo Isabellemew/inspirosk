@@ -1,18 +1,15 @@
 import { useState, useEffect, useRef } from "react";
-import { auth, db } from "../firebase.js";
-import { signOut } from "firebase/auth";
-import {
-  doc, getDoc, collection, getDocs, query, where,
-  addDoc, updateDoc, serverTimestamp, orderBy, onSnapshot
-} from "firebase/firestore";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { supabase } from "../supabaseClient.js";
 import { useNavigate } from "react-router-dom";
 import {
   MessageSquare, Send, Paperclip, Mic, Download,
   Image as ImageIcon, LogOut, CheckCircle, Clock, FileText,
-  Info, Star, Upload, Palette
+  Info, Star, Upload, Palette, Video, ShieldAlert
 } from "lucide-react";
 import "./Dashboard.css";
+import { useTranslation } from "../context/TranslationContext";
+import Header from "../components/Header.jsx";
+import InterviewBar from "../components/InterviewBar.jsx";
 
 // ── CUSTOM AUDIO PLAYER COMPONENT ──
 function AudioPlayer({ src, duration }) {
@@ -106,6 +103,18 @@ function AudioPlayer({ src, duration }) {
 }
 
 export default function DashboardStudent() {
+  const { t } = useTranslation();
+  
+  useEffect(() => {
+    window.onStartVideoCall = (url) => {
+      setJoiningVideoRoom(url);
+    };
+    return () => {
+      window.onStartVideoCall = null;
+    };
+  }, []);
+
+  const [user, setUser] = useState(null);
   const [userData, setUserData] = useState(null);
   const [labs, setLabs] = useState([]);
   const [myApplications, setMyApplications] = useState([]);
@@ -122,6 +131,13 @@ export default function DashboardStudent() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSent, setFeedbackSent] = useState(false);
+
+  // AI motivation draft generator state
+  const [aiGenerating, setAiGenerating] = useState(false);
+  // Video room joining state
+  const [joiningVideoRoom, setJoiningVideoRoom] = useState(null);
+  // Mobile sidebar state
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Search & Filters State
   const [searchQuery, setSearchQuery] = useState("");
@@ -143,14 +159,8 @@ export default function DashboardStudent() {
     localStorage.getItem("inspiro-theme") || "cosmic-dark"
   );
 
-  // Lightbox & Voice recorder States
+  // Lightbox States
   const [activeImageUrl, setActiveImageUrl] = useState(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingDuration, setRecordingDuration] = useState(0);
-
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const recordingTimerRef = useRef(null);
 
   const fileInputRef = useRef(null);
   const cvInputRef = useRef(null);
@@ -158,6 +168,17 @@ export default function DashboardStudent() {
   const fileAttachInputRef = useRef(null);
   const chatBottomRef = useRef(null);
   const navigate = useNavigate();
+
+  const getWarnings = () => {
+    if (!userData?.bio) return [];
+    try {
+      if (userData.bio.startsWith("{") && userData.bio.endsWith("}")) {
+        const parsed = JSON.parse(userData.bio);
+        return parsed.warnings || [];
+      }
+    } catch (e) {}
+    return [];
+  };
 
   const RESEARCH_AREAS = [
     "Machine Learning", "Биоинформатика", "Материаловедение",
@@ -175,72 +196,89 @@ export default function DashboardStudent() {
   // Fetch initial profile & labs
   useEffect(() => {
     const fetchData = async () => {
-      const user = auth.currentUser;
-      if (!user) return;
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) return navigate("/login");
+      setUser(currentUser);
 
       // 1. Fetch User Data
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      if (userDoc.exists()) {
-        const data = userDoc.data();
-        setUserData(data);
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", currentUser.id)
+        .single();
+
+      if (profile) {
+        setUserData(profile);
         setProfileForm({
-          name: data.name || "",
-          university: data.university || "",
-          degree: data.degree || "",
-          year: data.year || "",
-          bio: data.bio || "",
-          github: data.github || "",
-          linkedin: data.linkedin || "",
-          telegram: data.telegram || "",
-          skills: data.skills || "",
-          languages: data.languages || "",
-          achievements: data.achievements || "",
-          interests: data.interests || [],
+          name: profile.name || "",
+          university: profile.university || "",
+          degree: profile.degree || "",
+          year: profile.year || "",
+          bio: profile.bio || "",
+          github: profile.github || "",
+          linkedin: profile.linkedin || "",
+          telegram: profile.telegram || "",
+          skills: profile.skills || "",
+          languages: profile.languages || "",
+          achievements: profile.achievements || "",
+          interests: profile.interests || [],
         });
       }
 
       // 2. Fetch All Labs
-      const labsSnap = await getDocs(collection(db, "labs"));
-      setLabs(labsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const { data: labsData } = await supabase.from("labs").select("*");
+      setLabs(labsData || []);
 
       // 3. Fetch Applications
-      const appsSnap = await getDocs(
-        query(collection(db, "applications"), where("studentId", "==", user.uid))
-      );
-      const apps = appsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setMyApplications(apps);
+      const { data: appsData } = await supabase
+        .from("applications")
+        .select("*")
+        .eq("student_id", currentUser.id);
+      setMyApplications(appsData || []);
 
       setLoading(false);
     };
 
     fetchData();
-  }, []);
+  }, [navigate]);
+
+  // Fetch Messages helper
+  const fetchMessages = async (appId) => {
+    const { data: msgs } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("application_id", appId)
+      .order("created_at", { ascending: true });
+    
+    setChats(prev => ({
+      ...prev,
+      [appId]: msgs || []
+    }));
+    setTimeout(() => {
+      chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 80);
+  };
 
   // REAL-TIME Chat Listener for selected activeChatId
   useEffect(() => {
     if (!activeChatId) return;
 
-    const q = query(
-      collection(db, "chats", activeChatId, "messages"),
-      orderBy("createdAt", "asc")
-    );
+    fetchMessages(activeChatId);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map(d => ({
-        id: d.id,
-        ...d.data()
-      }));
-      setChats(prev => ({
-        ...prev,
-        [activeChatId]: msgs
-      }));
-      // Scroll to bottom
-      setTimeout(() => {
-        chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 80);
-    });
+    const subscription = supabase
+      .channel(`chat_${activeChatId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "messages", filter: `application_id=eq.${activeChatId}` },
+        () => {
+          fetchMessages(activeChatId);
+        }
+      )
+      .subscribe();
 
-    return () => unsubscribe();
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [activeChatId]);
 
   // Theme Changer
@@ -255,89 +293,106 @@ export default function DashboardStudent() {
     if (!file) return;
     setAvatarUploading(true);
     try {
-      const storage = getStorage();
-      const storageRef = ref(storage, `avatars/${auth.currentUser.uid}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      await updateDoc(doc(db, "users", auth.currentUser.uid), { avatarUrl: url });
-      setUserData(prev => ({ ...prev, avatarUrl: url }));
-    } catch {
-      alert("Ошибка загрузки фото. Проверь Firebase Storage правила.");
+      const fileName = `${user.id}_${Date.now()}.png`;
+      const { error: uploadErr } = await supabase.storage
+        .from("avatars")
+        .upload(fileName, file);
+
+      if (uploadErr) throw uploadErr;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("avatars")
+        .getPublicUrl(fileName);
+
+      await supabase.from("profiles").update({ avatar_url: publicUrl }).eq("id", user.id);
+      setUserData(prev => ({ ...prev, avatar_url: publicUrl }));
+    } catch (err) {
+      alert("Ошибка загрузки фото: " + err.message);
     }
     setAvatarUploading(false);
   };
 
   const handleSaveProfile = async () => {
-    await updateDoc(doc(db, "users", auth.currentUser.uid), { ...profileForm });
+    await supabase.from("profiles").update({ ...profileForm }).eq("id", user.id);
     setUserData(prev => ({ ...prev, ...profileForm }));
     setEditingProfile(false);
   };
 
-  const toggleInterest = (area) => {
-    setProfileForm(prev => ({
-      ...prev,
-      interests: prev.interests.includes(area)
-        ? prev.interests.filter(i => i !== area)
-        : [...prev.interests, area]
-    }));
-  };
-
   const handleApply = async (lab) => {
+    const warnings = getWarnings();
+    if (warnings.some(w => w.level === "ban")) {
+      alert("Вы заблокированы администратором и не можете подавать заявки.");
+      return;
+    }
     if (!motivation.trim()) return alert("Напиши мотивационное письмо");
-    const user = auth.currentUser;
     setCvUploading(true);
     let cvUrl = null;
     if (cvFile) {
       try {
-        const storage = getStorage();
-        const storageRef = ref(storage, `cvs/${user.uid}_${lab.id}`);
-        await uploadBytes(storageRef, cvFile);
-        cvUrl = await getDownloadURL(storageRef);
-      } catch {
-        alert("Ошибка загрузки CV");
+        const fileName = `${user.id}_${lab.id}_${Date.now()}_${cvFile.name}`;
+        const { error: uploadErr } = await supabase.storage
+          .from("cvs")
+          .upload(fileName, cvFile);
+
+        if (uploadErr) throw uploadErr;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from("cvs")
+          .getPublicUrl(fileName);
+        cvUrl = publicUrl;
+      } catch (err) {
+        alert("Ошибка загрузки CV: " + err.message);
         setCvUploading(false);
         return;
       }
     }
-    await addDoc(collection(db, "applications"), {
-      studentId: user.uid,
-      studentName: userData?.name || user.email,
-      studentEmail: user.email,
-      labId: lab.id,
-      labName: lab.name,
-      professorId: lab.professorId,
-      motivation,
-      cvUrl,
-      status: "pending",
-      createdAt: serverTimestamp(),
-    });
-    setApplyingTo(null);
-    setMotivation("");
-    setCvFile(null);
-    setCvUploading(false);
 
-    const appsSnap = await getDocs(
-      query(collection(db, "applications"), where("studentId", "==", user.uid))
-    );
-    setMyApplications(appsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const { error: appErr } = await supabase.from("applications").insert({
+      student_id: user.id,
+      student_name: userData?.name || user.email,
+      student_email: user.email,
+      lab_id: lab.id,
+      lab_name: lab.name,
+      professor_id: lab.professor_id,
+      motivation,
+      cv_url: cvUrl,
+      status: "pending",
+      timeline_data: [
+        { status: "pending", date: new Date().toLocaleDateString("ru"), note: "Заявка подана. Ожидает рассмотрения." }
+      ]
+    });
+
+    if (appErr) {
+      alert("Ошибка подачи заявки: " + appErr.message);
+    } else {
+      setApplyingTo(null);
+      setMotivation("");
+      setCvFile(null);
+      
+      const { data: appsData } = await supabase
+        .from("applications")
+        .select("*")
+        .eq("student_id", user.id);
+      setMyApplications(appsData || []);
+    }
+    setCvUploading(false);
   };
 
   const handleSendMessage = async (appId) => {
     if (!chatMessage.trim()) return;
-    const user = auth.currentUser;
     const textToSend = chatMessage;
     setChatMessage(""); // Clear input early for better UX
 
-    await addDoc(collection(db, "chats", appId, "messages"), {
+    await supabase.from("messages").insert({
+      application_id: appId,
       text: textToSend,
-      senderId: user.uid,
-      senderName: userData?.name || "Студент",
-      senderRole: "student",
-      createdAt: serverTimestamp(),
+      sender_id: user.id,
+      sender_name: userData?.name || "Студент",
+      sender_role: "student",
     });
   };
 
-  // Upload Files / Photos to Storage and Add Message to Firestore
+  // Upload Files / Photos to Storage and Add Message to Supabase
   const handleAttachUpload = async (e, type) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -347,121 +402,47 @@ export default function DashboardStudent() {
     }
 
     try {
-      const storage = getStorage();
-      const storageRef = ref(storage, `chats/${activeChatId}/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
+      const fileName = `${activeChatId}/${Date.now()}_${file.name}`;
+      const { error: uploadErr } = await supabase.storage
+        .from("chats")
+        .upload(fileName, file);
 
-      await addDoc(collection(db, "chats", activeChatId, "messages"), {
+      if (uploadErr) throw uploadErr;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("chats")
+        .getPublicUrl(fileName);
+
+      await supabase.from("messages").insert({
+        application_id: activeChatId,
         text: type === "image" ? "" : file.name,
-        fileUrl: url,
-        fileName: file.name,
-        fileType: type,
-        senderId: auth.currentUser.uid,
-        senderName: userData?.name || "Студент",
-        senderRole: "student",
-        createdAt: serverTimestamp(),
+        file_url: publicUrl,
+        file_name: file.name,
+        file_type: type,
+        sender_id: user.id,
+        sender_name: userData?.name || "Студент",
+        sender_role: "student",
       });
-    } catch {
-      alert("Не удалось отправить файл. Проверьте подключение.");
-    }
-  };
-
-  // AUDIO RECORDING FUNCTIONS
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        await uploadAudioMessage(audioBlob);
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-      setRecordingDuration(0);
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingDuration(prev => prev + 1);
-      }, 1000);
-    } catch {
-      alert("Не удалось получить доступ к микрофону");
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      clearInterval(recordingTimerRef.current);
-    }
-  };
-
-  const cancelRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.onstop = () => {
-        const stream = mediaRecorderRef.current.stream;
-        if (stream) {
-          stream.getTracks().forEach(track => track.stop());
-        }
-      };
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      clearInterval(recordingTimerRef.current);
-      setRecordingDuration(0);
-    }
-  };
-
-  const uploadAudioMessage = async (blob) => {
-    try {
-      const storage = getStorage();
-      const fileName = `voice_${Date.now()}.webm`;
-      const storageRef = ref(storage, `chats/${activeChatId}/${fileName}`);
-      await uploadBytes(storageRef, blob);
-      const url = await getDownloadURL(storageRef);
-
-      await addDoc(collection(db, "chats", activeChatId, "messages"), {
-        text: "",
-        fileUrl: url,
-        fileName: fileName,
-        fileType: "audio",
-        audioDuration: recordingDuration,
-        senderId: auth.currentUser.uid,
-        senderName: userData?.name || "Студент",
-        senderRole: "student",
-        createdAt: serverTimestamp(),
-      });
-    } catch {
-      alert("Ошибка сохранения голосового сообщения.");
+    } catch (err) {
+      alert("Не удалось отправить файл: " + err.message);
     }
   };
 
   const handleSendFeedback = async () => {
     if (!feedbackText.trim()) return;
-    await addDoc(collection(db, "feedback"), {
+    await supabase.from("feedback").insert({
       text: feedbackText,
-      userId: auth.currentUser.uid,
-      userRole: "student",
-      userName: userData?.name || "",
-      createdAt: serverTimestamp(),
+      user_id: user.id,
+      user_role: "student",
+      user_name: userData?.name || "",
     });
     setFeedbackText("");
     setFeedbackSent(true);
   };
 
-  // Clickable Avatar navigation helper to jump directly to chat tab
   const handleJumpToChat = (labId) => {
     const matchedApp = myApplications.find(
-      a => a.labId === labId && (a.status === "accepted" || a.status === "interview")
+      a => a.lab_id === labId && (a.status === "accepted" || a.status === "interview")
     );
     if (matchedApp) {
       setActiveTab("chat");
@@ -472,38 +453,49 @@ export default function DashboardStudent() {
   const statusLabel = s => ({ pending: "На рассмотрении", accepted: "Принят ✓", rejected: "Отклонено", interview: "🎯 Интервью" }[s] || s);
   const statusClass = s => ({ pending: "status-pending", accepted: "status-accepted", rejected: "status-rejected", interview: "status-interview" }[s] || "");
 
+  const hiddenLabIds = JSON.parse(localStorage.getItem("inspiro-hidden-labs") || "[]");
+  const verifiedLabIds = JSON.parse(localStorage.getItem("inspiro-verified-labs") || "[]");
   const myInterests = userData?.interests || [];
-  const recommendedLabs = labs.filter(l => l.researchAreas?.some(a => myInterests.includes(a)));
-  const appliedLabIds = myApplications.map(a => a.labId);
+  const recommendedLabs = labs.filter(l => !hiddenLabIds.includes(l.id) && l.research_areas?.some(a => myInterests.includes(a)));
+  const appliedLabIds = myApplications.map(a => a.lab_id);
   const chatApps = myApplications.filter(a => a.status === "accepted" || a.status === "interview");
   const initials = userData?.name?.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() || "S";
 
   // Filter Labs Logic
   const filteredLabs = labs.filter(lab => {
-    const matchesSearch = lab.name?.toLowerCase().includes(searchQuery.toLowerCase()) || lab.description?.toLowerCase().includes(searchQuery.toLowerCase()) || lab.professorName?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesArea = !filterArea || lab.researchAreas?.includes(filterArea);
-    const matchesNoExp = !filterNoExp || lab.noExperienceOk === true;
-    const matchesIntl = !filterIntl || lab.internationalOk === true;
-    const matchesPrep = !filterPrepLevel || lab.prepLevel === filterPrepLevel;
-    const matchesComm = !filterCommercial || lab.isCommercial === true;
+    if (hiddenLabIds.includes(lab.id)) return false;
+    const matchesSearch = lab.name?.toLowerCase().includes(searchQuery.toLowerCase()) || lab.description?.toLowerCase().includes(searchQuery.toLowerCase()) || lab.professor_name?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesArea = !filterArea || lab.research_areas?.includes(filterArea);
+    const matchesNoExp = !filterNoExp || lab.no_experience_ok === true;
+    const matchesIntl = !filterIntl || lab.international_ok === true;
+    const matchesPrep = !filterPrepLevel || lab.prep_level === filterPrepLevel;
+    const matchesComm = !filterCommercial || lab.is_commercial === true;
     return matchesSearch && matchesArea && matchesNoExp && matchesIntl && matchesPrep && matchesComm;
   });
 
-  // Find active chat details
   const activeChatApp = chatApps.find(a => a.id === activeChatId);
 
   if (loading) return <div className="dash-loading">Загрузка...</div>;
 
   return (
     <div className="dashboard">
+      
+      {/* ── MOBILE HEADER ── */}
+      <header className="mobile-header" style={{ display: "none" }}>
+        <button className="menu-toggle-btn" onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}>
+          ☰ Меню
+        </button>
+        <span className="land-logo" style={{ fontSize: 18, fontWeight: "bold" }}>inspirosk</span>
+      </header>
+
       {/* ── SIDEBAR ── */}
-      <aside className="dash-sidebar">
+      <aside className={`dash-sidebar ${mobileSidebarOpen ? "mobile-open" : ""}`}>
         <div className="dash-logo">inspirosk</div>
 
         <div className="dash-user">
-          <div className="dash-avatar" style={userData?.avatarUrl ? { padding: 0, overflow: "hidden" } : {}}>
-            {userData?.avatarUrl
-              ? <img src={userData.avatarUrl} alt="avatar" />
+          <div className="dash-avatar" style={userData?.avatar_url ? { padding: 0, overflow: "hidden" } : {}}>
+            {userData?.avatar_url
+              ? <img src={userData.avatar_url} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               : initials}
           </div>
           <div>
@@ -512,7 +504,7 @@ export default function DashboardStudent() {
           </div>
         </div>
 
-        {/* Theme Selector widget */}
+        {/* Theme Selector */}
         <div className="theme-selector-container">
           <label className="theme-label"><Palette size={12} style={{ marginRight: 4 }} /> Тема</label>
           <select value={activeTheme} onChange={(e) => handleThemeChange(e.target.value)} className="theme-dropdown">
@@ -522,28 +514,92 @@ export default function DashboardStudent() {
 
         <nav className="dash-nav">
           {[
-            ["discover", "🔍 Лаборатории", filteredLabs.length],
-            ["recommended", "⭐ Рекомендации", recommendedLabs.length],
-            ["applications", "📋 Мои заявки", myApplications.length],
-            ["chat", "💬 Чат", chatApps.length],
-            ["profile", "👤 Профиль", 0],
-            ["knowledge-hub", "📚 База знаний", 0],
-            ["support", "🛠 Поддержка", 0],
+            ["discover", "🔍 " + t("nav.discover"), filteredLabs.length],
+            ["recommended", "⭐ " + t("nav.discover") + " (Rec)", recommendedLabs.length],
+            ["applications", "📋 " + t("nav.my_applications"), myApplications.length],
+            ["interviews", "🎯 " + t("nav.interviews"), myApplications.filter(a => a.status === "interview").length],
+            ["chat", "💬 " + t("nav.chats"), chatApps.length],
+            ["profile", "👤 " + t("common.profile"), 0],
+            ["support", "🛠 " + t("nav.feedback"), 0],
           ].map(([tab, label, count]) => (
-            <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
+            <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => { setActiveTab(tab); setMobileSidebarOpen(false); }}>
               {label}
               {count > 0 && <span className="badge">{count}</span>}
             </button>
           ))}
         </nav>
 
-        <button className="dash-logout" onClick={() => { signOut(auth); navigate("/login"); }}>
+        <button className="dash-logout" onClick={() => { supabase.auth.signOut(); navigate("/login"); }}>
           <LogOut size={16} /> Выйти
         </button>
       </aside>
 
       {/* ── MAIN CONTENT ── */}
       <main className="dash-main">
+        <Header userProfile={userData} onOpenSettings={() => setActiveTab("profile")} />
+
+        {getWarnings().map((w, idx) => (
+          <div key={idx} style={{ 
+            margin: "16px 32px 0 32px", 
+            padding: "12px 18px", 
+            borderRadius: 12, 
+            background: w.level === "ban" ? "rgba(239,68,68,0.15)" : w.level === "warning" ? "rgba(245,158,11,0.15)" : "rgba(59,130,246,0.15)",
+            border: `1px solid ${w.level === "ban" ? "var(--status-rejected)" : w.level === "warning" ? "var(--status-pending)" : "var(--primary)"}`,
+            color: "var(--text-primary)",
+            display: "flex",
+            alignItems: "center",
+            gap: 12
+          }}>
+            <ShieldAlert size={20} style={{ color: w.level === "ban" ? "var(--status-rejected)" : w.level === "warning" ? "var(--status-pending)" : "var(--primary)", flexShrink: 0 }} />
+            <div>
+              <strong style={{ textTransform: "uppercase", fontSize: 12, display: "block" }}>
+                Системное предупреждение: {w.level === "ban" ? "БАН" : w.level === "warning" ? "ПРЕДУПРЕЖДЕНИЕ" : "ИНФО"}
+              </strong>
+              <span style={{ fontSize: 13 }}>{w.text}</span>
+            </div>
+          </div>
+        ))}
+
+        {/* ── ИНТЕРВЬЮ ── */}
+        {activeTab === "interviews" && (
+          <div className="dash-content">
+            <h1>{t("nav.interviews")}</h1>
+            <p className="dash-subtitle">Собеседования и расписание встреч</p>
+
+            {myApplications.filter(a => a.status === "interview").length === 0 ? (
+              <div className="empty-state">
+                <Video size={32} />
+                У вас нет приглашений на интервью.
+              </div>
+            ) : (
+              <div className="labs-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))" }}>
+                {myApplications.filter(a => a.status === "interview").map(app => (
+                  <div className="lab-card" key={app.id} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div>
+                      <h3 style={{ margin: "0 0 4px 0" }}>{app.lab_name}</h3>
+                      <p style={{ margin: 0, fontSize: 13, color: "var(--primary-light)" }}>
+                        Профессор: {labs.find(l => l.id === app.lab_id)?.professor_name || "Научный руководитель"}
+                      </p>
+                    </div>
+                    <div style={{ borderTop: "1px solid var(--border-color)", paddingTop: 14 }}>
+                      <InterviewBar 
+                        application={app} 
+                        currentUserRole="student" 
+                        onUpdate={async () => {
+                          const { data: appsData } = await supabase
+                            .from("applications")
+                            .select("*")
+                            .eq("student_id", user.id);
+                          setMyApplications(appsData || []);
+                        }} 
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── ЛАБОРАТОРИИ ── */}
         {activeTab === "discover" && (
@@ -598,13 +654,18 @@ export default function DashboardStudent() {
             
             <div className="labs-grid">
               {filteredLabs.map(lab => {
-                const chatApp = myApplications.find(a => a.labId === lab.id && (a.status === "accepted" || a.status === "interview"));
+                const chatApp = myApplications.find(a => a.lab_id === lab.id && (a.status === "accepted" || a.status === "interview"));
                 return (
-                  <div className="lab-card" key={lab.id} style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", borderLeft: lab.isCommercial ? "4px solid var(--status-pending)" : "1px solid var(--border-color)" }}>
+                  <div className="lab-card" key={lab.id} style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", borderLeft: lab.is_commercial ? "4px solid var(--status-pending)" : "1px solid var(--border-color)" }}>
                     <div>
                       <div className="lab-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <h3>{lab.name}</h3>
-                        {lab.isCommercial && <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)", fontSize: 11 }}>💰 Прикладной/R&D</span>}
+                        <h3 style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {lab.name}
+                          {verifiedLabIds.includes(lab.id) && (
+                            <CheckCircle size={16} style={{ color: "var(--status-accepted)", fill: "rgba(16,185,129,0.1)", flexShrink: 0 }} title="Верифицировано" />
+                          )}
+                        </h3>
+                        {lab.is_commercial && <span className="tag" style={{ background: "var(--status-pending-bg)", color: "var(--status-pending)", fontSize: 11 }}>💰 Прикладной/R&D</span>}
                       </div>
                       
                       <div
@@ -615,19 +676,18 @@ export default function DashboardStudent() {
                       >
                         <div className="lab-prof-avatar">👨‍🔬</div>
                         <p className="lab-professor">
-                          👨‍🔬 {lab.professorName} {lab.isIndependent ? "(Независимый)" : ""}
+                          👨‍🔬 {lab.professor_name} {lab.is_independent ? "(Независимый)" : ""}
                           {chatApp && <span style={{ fontSize: 11, marginLeft: 6, textDecoration: "underline" }}>(Чат 💬)</span>}
                         </p>
                       </div>
                       
                       <p className="lab-desc">{lab.description}</p>
                       
-                      {/* Transparency and Commercial tags on card */}
                       <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", margin: "8px 0" }}>
-                        {lab.noExperienceOk && <span className="tag" style={{ background: "rgba(16,185,129,0.12)", color: "#10b981", fontSize: 11 }}>Без опыта 👍</span>}
-                        {lab.internationalOk && <span className="tag" style={{ background: "rgba(59,130,246,0.12)", color: "#3b82f6", fontSize: 11 }}>Ин. студенты 🌍</span>}
+                        {lab.no_experience_ok && <span className="tag" style={{ background: "rgba(16,185,129,0.12)", color: "#10b981", fontSize: 11 }}>Без опыта 👍</span>}
+                        {lab.international_ok && <span className="tag" style={{ background: "rgba(59,130,246,0.12)", color: "#3b82f6", fontSize: 11 }}>Ин. студенты 🌍</span>}
                         <span className="tag" style={{ background: "rgba(129,140,248,0.12)", color: "var(--primary-light)", fontSize: 11 }}>
-                          Подготовка: {lab.prepLevel === "beginner" ? "Начальный" : lab.prepLevel === "intermediate" ? "Средний" : "Продвинутый"}
+                          Подготовка: {lab.prep_level === "beginner" ? "Начальный" : lab.prep_level === "intermediate" ? "Средний" : "Продвинутый"}
                         </span>
                       </div>
                       
@@ -635,15 +695,15 @@ export default function DashboardStudent() {
                     </div>
 
                     <div>
-                      <div className="lab-tags">{lab.researchAreas?.map(a => <span key={a} className="tag">{a}</span>)}</div>
+                      <div className="lab-tags">{lab.research_areas?.map(a => <span key={a} className="tag">{a}</span>)}</div>
                       
                       <div className="lab-footer">
-                        <span className="lab-spots">Мест: {lab.openSpots || "?"}</span>
+                        <span className="lab-spots">Мест: {lab.open_spots || "?"}</span>
                         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                           {appliedLabIds.includes(lab.id) ? (
                             <>
-                              <span className={`status-badge ${statusClass(myApplications.find(a => a.labId === lab.id)?.status)}`}>
-                                {statusLabel(myApplications.find(a => a.labId === lab.id)?.status)}
+                              <span className={`status-badge ${statusClass(myApplications.find(a => a.lab_id === lab.id)?.status)}`}>
+                                {statusLabel(myApplications.find(a => a.lab_id === lab.id)?.status)}
                               </span>
                               {chatApp && (
                                 <button className="btn-secondary" style={{ padding: "6px 10px" }} onClick={() => handleJumpToChat(lab.id)}>
@@ -673,31 +733,36 @@ export default function DashboardStudent() {
               ? <div className="empty-state"><Star size={32} />Нет совпадений. Обновите интересы в профиле.</div>
               : <div className="labs-grid">
                   {recommendedLabs.map(lab => {
-                    const chatApp = myApplications.find(a => a.labId === lab.id && (a.status === "accepted" || a.status === "interview"));
+                    const chatApp = myApplications.find(a => a.lab_id === lab.id && (a.status === "accepted" || a.status === "interview"));
                     return (
                       <div className="lab-card highlight" key={lab.id}>
-                        <h3>{lab.name}</h3>
+                        <h3 style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {lab.name}
+                          {verifiedLabIds.includes(lab.id) && (
+                            <CheckCircle size={16} style={{ color: "var(--status-accepted)", fill: "rgba(16,185,129,0.1)", flexShrink: 0 }} title="Верифицировано" />
+                          )}
+                        </h3>
                         <div
                           className="lab-professor-row"
                           onClick={() => chatApp && handleJumpToChat(lab.id)}
                           title={chatApp ? "Открыть чат" : ""}
                         >
                           <div className="lab-prof-avatar">👨‍🔬</div>
-                          <p className="lab-professor">👨‍🔬 {lab.professorName}</p>
+                          <p className="lab-professor">👨‍🔬 {lab.professor_name}</p>
                         </div>
                         <p className="lab-desc">{lab.description}</p>
                         <div className="lab-tags">
-                          {lab.researchAreas?.map(a => (
+                          {lab.research_areas?.map(a => (
                             <span key={a} className={`tag ${myInterests.includes(a) ? "tag-match" : ""}`}>{a}</span>
                           ))}
                         </div>
                         <div className="lab-footer">
-                          <span className="lab-spots">Мест: {lab.openSpots || "?"}</span>
+                          <span className="lab-spots">Мест: {lab.open_spots || "?"}</span>
                           {appliedLabIds.includes(lab.id)
                             ? (
                               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                                <span className={`status-badge ${statusClass(myApplications.find(a => a.labId === lab.id)?.status)}`}>
-                                  {statusLabel(myApplications.find(a => a.labId === lab.id)?.status)}
+                                <span className={`status-badge ${statusClass(myApplications.find(a => a.lab_id === lab.id)?.status)}`}>
+                                  {statusLabel(myApplications.find(a => a.lab_id === lab.id)?.status)}
                                 </span>
                                 {chatApp && (
                                   <button className="btn-secondary" style={{ padding: "6px 10px" }} onClick={() => handleJumpToChat(lab.id)}>
@@ -717,25 +782,55 @@ export default function DashboardStudent() {
           </div>
         )}
 
-        {/* ── ЗАЯВКИ ── */}
+        {/* ── МОИ ЗАЯВКИ ── */}
         {activeTab === "applications" && (
           <div className="dash-content">
             <h1>Мои заявки</h1>
-            <p className="dash-subtitle">История и текущие статусы ваших обращений</p>
+            <p className="dash-subtitle">Подробная история и таймлайны рассмотрения заявок с датами</p>
             {myApplications.length === 0
               ? <div className="empty-state"><FileText size={32} />Вы ещё не подавали заявки.</div>
-              : <div className="applications-list">
+              : <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                   {myApplications.map(app => (
-                    <div className="app-card" key={app.id}>
-                      <div className="app-info">
-                        <h3>{app.labName}</h3>
-                        <p className="app-date"><Clock size={12} /> {app.createdAt?.toDate?.().toLocaleDateString("ru")}</p>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div className="lab-card" key={app.id} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <h3 style={{ margin: 0 }}>{app.lab_name}</h3>
+                          <p style={{ margin: "2px 0 0 0", fontSize: 11, color: "var(--text-muted)" }}>Подано: {new Date(app.created_at).toLocaleDateString("ru")}</p>
+                        </div>
                         <span className={`status-badge ${statusClass(app.status)}`}>{statusLabel(app.status)}</span>
+                      </div>
+
+                      {/* Timeline component */}
+                      <div className="timeline-container" style={{ margin: "10px 0", borderLeft: "2px solid var(--border-color)", paddingLeft: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                        {/* Always show step 1: Submission */}
+                        <div className="timeline-step" style={{ position: "relative" }}>
+                          <span style={{ position: "absolute", left: -21, top: 4, width: 8, height: 8, borderRadius: "50%", background: "var(--primary)" }} />
+                          <p style={{ margin: 0, fontSize: 13, fontWeight: "bold" }}>Заявка отправлена — {new Date(app.created_at).toLocaleDateString("ru")}</p>
+                          <p style={{ margin: "2px 0 0 0", fontSize: 11, color: "var(--text-muted)" }}>Вы написали мотивационное письмо и предложили соавторство.</p>
+                        </div>
+
+                        {/* Show step 2: Interview or accepted/rejected from timeline_data */}
+                        {app.timeline_data?.slice(1).map((step, idx) => (
+                          <div className="timeline-step" key={idx} style={{ position: "relative" }}>
+                            <span style={{ position: "absolute", left: -21, top: 4, width: 8, height: 8, borderRadius: "50%", background: step.status === "rejected" ? "var(--status-rejected)" : step.status === "accepted" ? "var(--status-accepted)" : "var(--status-interview)" }} />
+                            <p style={{ margin: 0, fontSize: 13, fontWeight: "bold" }}>
+                              {step.status === "interview" ? "🎯 Интервью назначено" : step.status === "accepted" ? "✓ Принят в проект" : "✗ Заявка отклонена"} — {step.date}
+                            </p>
+                            <p style={{ margin: "2px 0 0 0", fontSize: 11, color: "var(--text-muted)" }}>{step.note}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Action buttons (Chat & Daily Video) */}
+                      <div style={{ display: "flex", gap: 10, marginTop: 5 }}>
                         {(app.status === "accepted" || app.status === "interview") && (
-                          <button className="btn-secondary" onClick={() => { setActiveTab("chat"); setActiveChatId(app.id); }}>
-                            <MessageSquare size={14} /> Написать
+                          <button className="btn-secondary" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => { setActiveTab("chat"); setActiveChatId(app.id); }}>
+                            <MessageSquare size={13} style={{ marginRight: 4 }} /> Чат обсуждения
+                          </button>
+                        )}
+                        {app.video_room_url && (
+                          <button className="btn-apply" style={{ padding: "6px 12px", fontSize: 12, background: "var(--status-interview-bg)", color: "var(--status-interview)", border: "1px solid var(--status-interview)" }} onClick={() => setJoiningVideoRoom(app.video_room_url)}>
+                            🎥 Войти в видео-интервью
                           </button>
                         )}
                       </div>
@@ -746,173 +841,60 @@ export default function DashboardStudent() {
           </div>
         )}
 
-        {/* ── RICH CHAT ── */}
+        {/* ── ЧАТ ── */}
         {activeTab === "chat" && (
-          <div className="dash-content">
-            <h1>Сообщения</h1>
-            <p className="dash-subtitle">Официальный чат с профессорами</p>
-            {chatApps.length === 0
-              ? <div className="empty-state"><MessageSquare size={32} />Чат откроется после того, как профессор примет заявку или пригласит на интервью.</div>
-              : <div className="chat-layout">
-                  {/* Chat sidebar list */}
-                  <div className="chat-list">
-                    {chatApps.map(app => {
-                      const lastMsgs = chats[app.id] || [];
-                      const lastMsg = lastMsgs[lastMsgs.length - 1];
-                      let previewText = "Сообщений нет";
-                      if (lastMsg) {
-                        if (lastMsg.fileType === "image") previewText = "📷 Фотография";
-                        else if (lastMsg.fileType === "audio") previewText = "🎤 Голосовое сообщение";
-                        else if (lastMsg.fileType === "file") previewText = `📄 ${lastMsg.fileName}`;
-                        else previewText = lastMsg.text;
-                      }
+          <div className="dash-content" style={{ height: "calc(100vh - 120px)" }}>
+            <h1>Чат обсуждения</h1>
+            <div className="chat-window-layout" style={{ display: "flex", height: "90%", border: "1px solid var(--border-color)", borderRadius: 12, overflow: "hidden", background: "var(--dash-sidebar)" }}>
+              {/* Chat sidebar */}
+              <div className="chat-list-sidebar" style={{ width: 250, borderRight: "1px solid var(--border-color)" }}>
+                {chatApps.length === 0 ? (
+                  <p style={{ padding: 15, fontSize: 12, color: "var(--text-muted)" }}>Нет активных чатов. Чаты открываются при принятии заявок.</p>
+                ) : (
+                  chatApps.map(app => (
+                    <div key={app.id} className={`chat-item-node ${activeChatId === app.id ? "active-node" : ""}`} onClick={() => setActiveChatId(app.id)} style={{ padding: 12, cursor: "pointer", borderBottom: "1px solid var(--border-color)", background: activeChatId === app.id ? "var(--primary-glow)" : "transparent" }}>
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13 }}>{app.lab_name}</p>
+                      <p style={{ margin: "2px 0 0 0", fontSize: 11, color: "var(--text-muted)" }}>{app.student_name === userData?.name ? "Владелец" : app.student_name}</p>
+                    </div>
+                  ))
+                )}
+              </div>
 
-                      return (
-                        <div key={app.id} className={`chat-person ${activeChatId === app.id ? "active" : ""}`} onClick={() => setActiveChatId(app.id)}>
-                          <div className="student-avatar" style={{ background: "var(--primary)" }}>{app.labName?.[0]}</div>
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ fontWeight: 600, fontSize: 13, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>{app.labName}</div>
-                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, display: "flex", justifyContent: "space-between" }}>
-                              <span>{app.status === "interview" ? "🎯 Интервью" : "✓ Принят"}</span>
-                            </div>
-                            <div style={{ fontSize: 11, color: "var(--text-secondary)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap", marginTop: 4 }}>
-                              {previewText}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Chat Window Panel */}
-                  <div className="chat-window">
-                    {!activeChatId
-                      ? <div className="empty-state"><MessageSquare size={32} />Выберите беседу для начала общения</div>
-                      : <>
-                          {/* Chat Header */}
-                          <div className="chat-header">
-                            <div className="chat-header-user">
-                              <div className="student-avatar" style={{ width: 34, height: 34, fontSize: 12 }}>{activeChatApp?.labName?.[0]}</div>
-                              <div>
-                                <div className="chat-header-name">{activeChatApp?.labName}</div>
-                                <div className="chat-header-sub">Профессор ID: {activeChatApp?.professorId?.slice(0, 8)}...</div>
+              {/* Chat messages */}
+              <div className="chat-main-window" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+                {activeChatId && activeChatApp ? (
+                  <>
+                    <div className="chat-header" style={{ padding: 12, borderBottom: "1px solid var(--border-color)", background: "var(--dash-card)" }}>
+                      <h4 style={{ margin: 0 }}>{activeChatApp.lab_name}</h4>
+                      <p style={{ margin: 0, fontSize: 11, color: "var(--text-muted)" }}>Диалог с руководителем</p>
+                    </div>
+                    <div className="chat-messages-container" style={{ flex: 1, padding: 15, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+                      {(chats[activeChatId] || []).map(msg => {
+                        const isMe = msg.sender_id === user.id;
+                        return (
+                          <div key={msg.id} style={{ alignSelf: isMe ? "flex-end" : "flex-start", background: isMe ? "var(--primary)" : "var(--dash-card)", padding: "10px 14px", borderRadius: 12, maxWidth: "60%" }}>
+                            <p style={{ margin: 0, fontSize: 11, fontWeight: "bold", color: isMe ? "#fff" : "var(--primary-light)" }}>{msg.sender_name}</p>
+                            <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "#fff" }}>{msg.text}</p>
+                            {msg.file_url && (
+                              <div style={{ marginTop: 5 }}>
+                                <a href={msg.file_url} target="_blank" rel="noreferrer" style={{ color: "#00ffcc", fontSize: 12, textDecoration: "underline" }}>📄 Открыть вложение</a>
                               </div>
-                            </div>
-                          </div>
-
-                          {/* Chat Messages scroll area */}
-                          <div className="chat-messages">
-                            {(chats[activeChatId] || []).map((msg, i) => {
-                              const isMine = msg.senderRole === "student";
-                              return (
-                                <div key={msg.id || i} className={`chat-bubble ${isMine ? "mine" : "theirs"}`}>
-                                  {/* Render Image type */}
-                                  {msg.fileType === "image" && msg.fileUrl && (
-                                    <img
-                                      src={msg.fileUrl}
-                                      alt="attachment"
-                                      className="chat-image-preview"
-                                      onClick={() => setActiveImageUrl(msg.fileUrl)}
-                                    />
-                                  )}
-
-                                  {/* Render Document/File type */}
-                                  {msg.fileType === "file" && msg.fileUrl && (
-                                    <div className="chat-file-card">
-                                      <div className="chat-file-icon">
-                                        <FileText size={16} />
-                                      </div>
-                                      <div className="chat-file-info">
-                                        <div className="chat-file-name">{msg.fileName}</div>
-                                      </div>
-                                      <a href={msg.fileUrl} target="_blank" rel="noreferrer" className="chat-file-download">
-                                        <Download size={16} />
-                                      </a>
-                                    </div>
-                                  )}
-
-                                  {/* Render Audio type */}
-                                  {msg.fileType === "audio" && msg.fileUrl && (
-                                    <AudioPlayer src={msg.fileUrl} duration={msg.audioDuration} />
-                                  )}
-
-                                  {/* Text Content */}
-                                  {msg.text && <span>{msg.text}</span>}
-
-                                  <span className="chat-time">
-                                    {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                            <div ref={chatBottomRef} />
-                          </div>
-
-                          {/* Bottom input area */}
-                          <div className="chat-input-row">
-                            {/* Hidden file input pickers */}
-                            <input
-                              type="file"
-                              ref={imageAttachInputRef}
-                              accept="image/*"
-                              style={{ display: "none" }}
-                              onChange={(e) => handleAttachUpload(e, "image")}
-                            />
-                            <input
-                              type="file"
-                              ref={fileAttachInputRef}
-                              accept="*"
-                              style={{ display: "none" }}
-                              onChange={(e) => handleAttachUpload(e, "file")}
-                            />
-
-                            {/* Attach menu buttons */}
-                            <button className="chat-attach-btn" onClick={() => imageAttachInputRef.current.click()} title="Прикрепить фото">
-                              <ImageIcon size={20} />
-                            </button>
-                            <button className="chat-attach-btn" onClick={() => fileAttachInputRef.current.click()} title="Прикрепить файл">
-                              <Paperclip size={20} />
-                            </button>
-
-                            {/* Voice Recorder Indicator / Text Input */}
-                            {isRecording ? (
-                              <div className="voice-recorder-bar">
-                                <div>
-                                  <span className="voice-pulser" />
-                                  Запись голосового: {recordingDuration}с
-                                </div>
-                                <button className="voice-cancel-btn" onClick={cancelRecording}>Отмена</button>
-                              </div>
-                            ) : (
-                              <input
-                                className="chat-text-input"
-                                value={chatMessage}
-                                onChange={e => setChatMessage(e.target.value)}
-                                onKeyDown={e => e.key === "Enter" && handleSendMessage(activeChatId)}
-                                placeholder="Написать сообщение..."
-                              />
-                            )}
-
-                            {/* Mic/Send button toggles */}
-                            {chatMessage.trim() ? (
-                              <button className="chat-send-btn" onClick={() => handleSendMessage(activeChatId)}>
-                                <Send size={16} />
-                              </button>
-                            ) : (
-                              <button
-                                className={`chat-mic-btn ${isRecording ? "recording" : ""}`}
-                                onClick={isRecording ? stopRecording : startRecording}
-                                title={isRecording ? "Отправить голосовое" : "Записать голосовое"}
-                              >
-                                {isRecording ? <Send size={16} /> : <Mic size={20} />}
-                              </button>
                             )}
                           </div>
-                        </>
-                    }
-                  </div>
-                </div>
-            }
+                        );
+                      })}
+                      <div ref={chatBottomRef} />
+                    </div>
+                    <div className="chat-input-row" style={{ padding: 12, display: "flex", gap: 8, background: "var(--dash-card)" }}>
+                      <input type="text" placeholder="Введите сообщение..." value={chatMessage} onChange={e => setChatMessage(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSendMessage(activeChatId)} style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "#fff" }} />
+                      <button className="btn-apply" onClick={() => handleSendMessage(activeChatId)} style={{ padding: "10px 15px" }}><Send size={16} /></button>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}>Выберите переписку для начала общения</div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -920,112 +902,70 @@ export default function DashboardStudent() {
         {activeTab === "profile" && (
           <div className="dash-content">
             <h1>Мой профиль</h1>
-            <p className="dash-subtitle">Расскажите лабораториям о себе</p>
-            <div className="profile-card" style={{ flexDirection: "column", alignItems: "flex-start", gap: 24 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-                <div className="profile-avatar" style={userData?.avatarUrl ? { padding: 0, overflow: "hidden", width: 80, height: 80 } : { width: 80, height: 80, fontSize: 32 }}>
-                  {userData?.avatarUrl
-                    ? <img src={userData.avatarUrl} alt="avatar" />
-                    : initials}
-                </div>
-                <div>
-                  <button className="btn-secondary" onClick={() => fileInputRef.current.click()} disabled={avatarUploading}>
-                    <Upload size={14} style={{ marginRight: 6 }} /> {avatarUploading ? "Загрузка..." : "Сменить фото"}
-                  </button>
-                  <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleAvatarUpload} />
-                </div>
-              </div>
-
+            <p className="dash-subtitle">Управление вашей личной информацией и интересами</p>
+            <div className="profile-card" style={{ padding: 24, background: "var(--dash-card)", border: "1px solid var(--border-color)", borderRadius: 16 }}>
               {editingProfile ? (
-                <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 14 }}>
-                  {[
-                    ["name", "Имя"], ["university", "Университет"],
-                    ["github", "GitHub"], ["linkedin", "LinkedIn"], ["telegram", "Telegram"],
-                    ["skills", "Навыки (через запятую)"],
-                    ["languages", "Языки"], ["achievements", "Достижения"],
-                  ].map(([field, label]) => (
-                    <div className="profile-edit-row" key={field}>
-                      <label>{label}</label>
-                      <input value={profileForm[field]} onChange={e => setProfileForm(p => ({ ...p, [field]: e.target.value }))} />
-                    </div>
-                  ))}
-                  <div className="profile-edit-row">
-                    <label>О себе</label>
-                    <textarea rows={3} value={profileForm.bio} onChange={e => setProfileForm(p => ({ ...p, bio: e.target.value }))} placeholder="Кратко о себе..." />
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%" }}>
+                  <div className="field-group">
+                    <label>Полное имя</label>
+                    <input type="text" value={profileForm.name} onChange={e => setProfileForm({ ...profileForm, name: e.target.value })} />
                   </div>
-                  <div className="profile-edit-row">
-                    <label>Интересы</label>
-                    <div className="lab-tags" style={{ marginTop: 6 }}>
-                      {RESEARCH_AREAS.map(area => (
-                        <span
-                          key={area}
-                          className={`tag ${profileForm.interests.includes(area) ? "tag-match" : ""}`}
-                          style={{ cursor: "pointer", padding: "6px 14px" }}
-                          onClick={() => toggleInterest(area)}
-                        >
-                          {area}
-                        </span>
-                      ))}
-                    </div>
+                  <div className="field-group">
+                    <label>Университет</label>
+                    <input type="text" value={profileForm.university} onChange={e => setProfileForm({ ...profileForm, university: e.target.value })} />
                   </div>
-                  <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                  <div className="field-group">
+                    <label>О себе / Опыт</label>
+                    <textarea value={profileForm.bio} onChange={e => setProfileForm({ ...profileForm, bio: e.target.value })} rows={3} />
+                  </div>
+                  <div className="field-group">
+                    <label>Степень</label>
+                    <select value={profileForm.degree} onChange={e => setProfileForm({ ...profileForm, degree: e.target.value })}>
+                      <option value="bachelor">Бакалавриат</option>
+                      <option value="master">Магистратура</option>
+                      <option value="phd">PhD</option>
+                    </select>
+                  </div>
+                  <div className="field-group">
+                    <label>Курс</label>
+                    <input type="number" value={profileForm.year} onChange={e => setProfileForm({ ...profileForm, year: e.target.value })} />
+                  </div>
+                  <div className="field-group">
+                    <label>GitHub</label>
+                    <input type="text" value={profileForm.github} onChange={e => setProfileForm({ ...profileForm, github: e.target.value })} />
+                  </div>
+                  <div className="field-group">
+                    <label>LinkedIn</label>
+                    <input type="text" value={profileForm.linkedin} onChange={e => setProfileForm({ ...profileForm, linkedin: e.target.value })} />
+                  </div>
+                  <div className="field-group">
+                    <label>Telegram</label>
+                    <input type="text" value={profileForm.telegram} onChange={e => setProfileForm({ ...profileForm, telegram: e.target.value })} />
+                  </div>
+                  <div className="field-group">
+                    <label>Навыки</label>
+                    <input type="text" value={profileForm.skills} onChange={e => setProfileForm({ ...profileForm, skills: e.target.value })} />
+                  </div>
+                  <div style={{ display: "flex", gap: 10 }}>
                     <button className="btn-apply" onClick={handleSaveProfile}>Сохранить</button>
                     <button className="btn-secondary" onClick={() => setEditingProfile(false)}>Отмена</button>
                   </div>
                 </div>
               ) : (
-                <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
-                  {[
-                    ["Имя", userData?.name],
-                    ["Email", auth.currentUser?.email],
-                    ["Университет", userData?.university],
-                    ["Степень", userData?.degree],
-                    ["Курс", userData?.year ? `${userData.year} курс` : null],
-                    ["О себе", userData?.bio],
-                    ["Навыки", userData?.skills],
-                    ["Языки", userData?.languages],
-                    ["Достижения", userData?.achievements],
-                    ["GitHub", userData?.github],
-                    ["LinkedIn", userData?.linkedin],
-                    ["Telegram", userData?.telegram],
-                  ].map(([label, val]) => val ? (
-                    <div className="profile-row" key={label}><span>{label}:</span> <span>{val}</span></div>
-                  ) : null)}
-                  {(userData?.interests || []).length > 0 && (
-                    <div className="profile-row">
-                      <span>Интересы:</span>
-                      <div className="lab-tags" style={{ marginTop: 4 }}>
-                        {userData.interests.map(i => <span key={i} className="tag">{i}</span>)}
-                      </div>
-                    </div>
-                  )}
-                  <button className="btn-apply" style={{ marginTop: 16, width: "max-content" }} onClick={() => setEditingProfile(true)}>
-                    ✏️ Редактировать профиль
-                  </button>
+                <div>
+                  <h2>{userData?.name || "Имя не заполнено"}</h2>
+                  <p style={{ color: "var(--primary-light)" }}>Университет: {userData?.university || "не указан"}</p>
+                  <p>{userData?.bio || "О себе не заполнено."}</p>
+                  <hr style={{ borderColor: "var(--border-color)", margin: "15px 0" }} />
+                  <p><strong>Степень:</strong> {userData?.degree === "bachelor" ? "Бакалавриат" : userData?.degree === "master" ? "Магистратура" : userData?.degree || "не указана"}</p>
+                  <p><strong>Курс:</strong> {userData?.year || "не указан"}</p>
+                  <p><strong>GitHub:</strong> {userData?.github ? <a href={userData.github} target="_blank" rel="noreferrer">{userData.github}</a> : "не привязан"}</p>
+                  <p><strong>LinkedIn:</strong> {userData?.linkedin ? <a href={userData.linkedin} target="_blank" rel="noreferrer">{userData.linkedin}</a> : "не привязан"}</p>
+                  <p><strong>Навыки:</strong> {userData?.skills || "не указаны"}</p>
+                  <button className="btn-apply" style={{ marginTop: 15 }} onClick={() => setEditingProfile(true)}>Редактировать профиль</button>
                 </div>
               )}
             </div>
-          </div>
-        )}
-
-        {/* ── ПОДДЕРЖКА ── */}
-        {activeTab === "support" && (
-          <div className="dash-content">
-            <h1>Поддержка и отзывы</h1>
-            <p className="dash-subtitle">Напишите нам — мы рады любым отзывам и предложениям</p>
-            {feedbackSent
-              ? <div className="empty-state" style={{ borderColor: "var(--status-accepted)", color: "var(--status-accepted)" }}><CheckCircle size={32} />✓ Спасибо за отзыв!</div>
-              : <div style={{ background: "var(--dash-card)", border: "1px solid var(--border-color)", borderRadius: 20, padding: 32, maxWidth: 580, boxShadow: "0 4px 20px var(--shadow)" }}>
-                  <textarea
-                    style={{ width: "100%", padding: "14px", background: "var(--input-bg)", border: "1px solid var(--border-color)", color: "var(--text-primary)", borderRadius: 12, fontSize: 14.5, fontFamily: "inherit", resize: "vertical", outline: "none", boxSizing: "border-box" }}
-                    rows={6}
-                    value={feedbackText}
-                    onChange={e => setFeedbackText(e.target.value)}
-                    placeholder="Опишите проблему или предложение..."
-                  />
-                  <button className="btn-apply" style={{ marginTop: 16 }} onClick={handleSendFeedback}>Отправить</button>
-                </div>
-            }
           </div>
         )}
 
@@ -1076,13 +1016,44 @@ export default function DashboardStudent() {
             </div>
           </div>
         )}
+
+        {/* ── ПОДДЕРЖКА ── */}
+        {activeTab === "support" && (
+          <div className="dash-content">
+            <h1>Поддержка и отзывы</h1>
+            <p className="dash-subtitle">Напишите нам — мы рады любым отзывам и предложениям</p>
+            {feedbackSent
+              ? <div className="empty-state" style={{ borderColor: "var(--status-accepted)", color: "var(--status-accepted)" }}><CheckCircle size={32} />✓ Спасибо за отзыв!</div>
+              : <div style={{ background: "var(--dash-card)", border: "1px solid var(--border-color)", borderRadius: 20, padding: 32, maxWidth: 580, boxShadow: "0 4px 20px var(--shadow)" }}>
+                  <textarea
+                    style={{ width: "100%", padding: "14px", background: "var(--input-bg)", border: "1px solid var(--border-color)", color: "var(--text-primary)", borderRadius: 12, fontSize: 14.5, fontFamily: "inherit", resize: "vertical", outline: "none", boxSizing: "border-box" }}
+                    rows={6}
+                    value={feedbackText}
+                    onChange={e => setFeedbackText(e.target.value)}
+                    placeholder="Опишите проблему или предложение..."
+                  />
+                  <button className="btn-apply" style={{ marginTop: 16 }} onClick={handleSendFeedback}>Отправить</button>
+                </div>
+            }
+          </div>
+        )}
       </main>
 
-      {/* ── IMAGE LIGHTBOX MODAL ── */}
-      {activeImageUrl && (
-        <div className="lightbox-overlay" onClick={() => setActiveImageUrl(null)}>
-          <button className="lightbox-close" onClick={() => setActiveImageUrl(null)}>×</button>
-          <img src={activeImageUrl} alt="Fullscreen Attachment" className="lightbox-img" onClick={e => e.stopPropagation()} />
+      {/* ── Daily.co Video Interview Iframe Modal ── */}
+      {joiningVideoRoom && (
+        <div className="modal-overlay" onClick={() => setJoiningVideoRoom(null)}>
+          <div className="modal" style={{ maxWidth: 800, width: "95%", height: "600px", padding: 20 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-color)", paddingBottom: 10, marginBottom: 15 }}>
+              <h3 style={{ margin: 0 }}>🎥 Видео-интервью Daily.co</h3>
+              <button className="btn-secondary" onClick={() => setJoiningVideoRoom(null)} style={{ padding: "4px 8px" }}>Выйти</button>
+            </div>
+            <iframe 
+              title="Видео-интервью Daily.co"
+              src={joiningVideoRoom} 
+              allow="camera; microphone; fullscreen; display-capture; autoplay" 
+              style={{ width: "100%", height: "480px", border: "none", borderRadius: 12 }} 
+            />
+          </div>
         </div>
       )}
 
@@ -1096,7 +1067,7 @@ export default function DashboardStudent() {
             </div>
             
             <p className="lab-professor" style={{ color: "var(--primary-light)", marginTop: 8 }}>
-              👨‍🔬 Руководитель: {applyingTo.professorName} {applyingTo.isIndependent ? "(Независимый проект)" : ""}
+              👨‍🔬 Руководитель: {applyingTo.professor_name} {applyingTo.is_independent ? "(Независимый проект)" : ""}
             </p>
             
             <div className="unified-modal-content" style={{ display: "flex", gap: "24px", marginTop: "15px", flexWrap: "wrap" }}>
@@ -1105,16 +1076,16 @@ export default function DashboardStudent() {
                 <p style={{ fontSize: 13.5, lineHeight: 1.5 }}>{applyingTo.description}</p>
                 
                 <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", margin: "14px 0" }}>
-                  {applyingTo.noExperienceOk ? (
+                  {applyingTo.no_experience_ok ? (
                     <span className="tag" style={{ background: "rgba(16,185,129,0.15)", color: "#10b981", fontWeight: 600 }}>Без опыта 👍</span>
                   ) : (
                     <span className="tag" style={{ background: "rgba(239,68,68,0.1)", color: "#ef4444" }}>Опыт обязателен</span>
                   )}
-                  {applyingTo.internationalOk && <span className="tag" style={{ background: "rgba(59,130,246,0.15)", color: "#3b82f6", fontWeight: 600 }}>Иностранным студентам 🌍</span>}
+                  {applyingTo.international_ok && <span className="tag" style={{ background: "rgba(59,130,246,0.15)", color: "#3b82f6", fontWeight: 600 }}>Иностранным студентам 🌍</span>}
                   <span className="tag" style={{ background: "rgba(129,140,248,0.15)", color: "var(--primary-light)" }}>
-                    Подготовка: {applyingTo.prepLevel === "beginner" ? "Начальный" : applyingTo.prepLevel === "intermediate" ? "Средний" : "Продвинутый"}
+                    Подготовка: {applyingTo.prep_level === "beginner" ? "Начальный" : applyingTo.prep_level === "intermediate" ? "Средний" : "Продвинутый"}
                   </span>
-                  {applyingTo.isCommercial && <span className="tag" style={{ background: "rgba(245,158,11,0.15)", color: "#f59e0b", fontWeight: 600 }}>💰 Коммерческий</span>}
+                  {applyingTo.is_commercial && <span className="tag" style={{ background: "rgba(245,158,11,0.15)", color: "#f59e0b", fontWeight: 600 }}>💰 Коммерческий</span>}
                 </div>
                 
                 <h4 style={{ margin: "14px 0 4px 0", color: "var(--primary-light)" }}>📋 Требования и квалификации:</h4>
@@ -1127,15 +1098,15 @@ export default function DashboardStudent() {
 
                 <h4 style={{ margin: "14px 0 4px 0", color: "var(--status-accepted)" }}>📝 Инструкции по подаче:</h4>
                 <p style={{ fontSize: 13, background: "rgba(16,185,129,0.05)", padding: 10, borderRadius: 8, borderLeft: "3px solid var(--status-accepted)" }}>
-                  {applyingTo.howToApply || "Напишите краткое мотивационное письмо справа и прикрепите резюме."}
+                  {applyingTo.how_to_apply || "Напишите краткое мотивационное письмо справа и прикрепите резюме."}
                 </p>
 
-                {applyingTo.isCommercial && (
+                {applyingTo.is_commercial && (
                   <div style={{ background: "rgba(245,158,11,0.05)", padding: 12, borderRadius: 8, marginTop: 14, borderLeft: "3px solid var(--status-pending)" }}>
                     <h4 style={{ margin: "0 0 6px 0", color: "var(--status-pending)" }}>💰 Коммерческий потенциал:</h4>
-                    <p style={{ margin: "4px 0", fontSize: 12 }}><strong>Необходимое финансирование:</strong> ${applyingTo.fundingNeeded?.toLocaleString() || "не указано"}</p>
-                    <p style={{ margin: "4px 0", fontSize: 12 }}><strong>Статус прототипа:</strong> {applyingTo.prototypeStatus || "в разработке"}</p>
-                    <p style={{ margin: "4px 0", fontSize: 12 }}><strong>Рыночная ценность:</strong> {applyingTo.marketPotential || "высокая"}</p>
+                    <p style={{ margin: "4px 0", fontSize: 12 }}><strong>Необходимое финансирование:</strong> ${applyingTo.funding_needed?.toLocaleString() || "не указано"}</p>
+                    <p style={{ margin: "4px 0", fontSize: 12 }}><strong>Статус прототипа:</strong> {applyingTo.prototype_status || "в разработке"}</p>
+                    <p style={{ margin: "4px 0", fontSize: 12 }}><strong>Рыночная ценность:</strong> {applyingTo.market_potential || "высокая"}</p>
                   </div>
                 )}
               </div>
@@ -1143,8 +1114,8 @@ export default function DashboardStudent() {
               <div className="unified-modal-form" style={{ flex: 1, minWidth: "280px", borderLeft: "1px solid var(--border-color)", paddingLeft: "24px" }}>
                 {appliedLabIds.includes(applyingTo.id) ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 12, justifyContent: "center", height: "100%", alignItems: "center", padding: "40px 0" }}>
-                    <span className={`status-badge ${statusClass(myApplications.find(a => a.labId === applyingTo.id)?.status)}`} style={{ fontSize: 14, padding: "8px 16px" }}>
-                      Статус: {statusLabel(myApplications.find(a => a.labId === applyingTo.id)?.status)}
+                    <span className={`status-badge ${statusClass(myApplications.find(a => a.lab_id === applyingTo.id)?.status)}`} style={{ fontSize: 14, padding: "8px 16px" }}>
+                      Статус: {statusLabel(myApplications.find(a => a.lab_id === applyingTo.id)?.status)}
                     </span>
                     <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>Вы уже подали заявку в этот проект. Вы можете связаться с руководителем в чате, если статус «Принят» или «Интервью».</p>
                   </div>
@@ -1160,6 +1131,45 @@ export default function DashboardStudent() {
                         rows={6}
                         style={{ width: "100%", padding: "10px 14px", background: "var(--input-bg)", border: "1px solid var(--border-color)", color: "#fff", borderRadius: 8, fontFamily: "inherit", fontSize: 13.5 }}
                       />
+                      
+                      {/* AI Letter Assist */}
+                      <div style={{ marginTop: 10 }}>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6, width: "100%", justifyContent: "center", background: "rgba(79, 70, 229, 0.1)", border: "1px solid var(--primary-light)", color: "var(--primary-light)" }}
+                          onClick={async () => {
+                            if (aiGenerating) return;
+                            setAiGenerating(true);
+                            try {
+                              const res = await fetch("http://localhost:8000/api/generate-motivation", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  student_name: userData?.name || "",
+                                  student_bio: userData?.bio || "",
+                                  student_skills: userData?.skills || "",
+                                  student_interests: userData?.interests || [],
+                                  project_name: applyingTo.name,
+                                  project_desc: applyingTo.description,
+                                  project_requirements: applyingTo.requirements || ""
+                                })
+                              });
+                              const data = await res.json();
+                              if (data.draft) {
+                                setMotivation(data.draft);
+                              } else {
+                                alert("Не удалось получить ответ от AI-ассистента.");
+                              }
+                            } catch {
+                              alert("Не удалось соединиться с AI-сервером на http://localhost:8000. Убедитесь, что Python бэкенд запущен.");
+                            }
+                            setAiGenerating(false);
+                          }}
+                        >
+                          🤖 {aiGenerating ? "Составляем письмо..." : "Написать письмо с помощью AI"}
+                        </button>
+                      </div>
                     </div>
                     <div>
                       <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 8 }}>📄 Прикрепить резюме / CV (PDF, необязательно)</label>

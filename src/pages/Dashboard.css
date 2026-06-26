@@ -1487,3 +1487,101 @@
   margin: 0;
   line-height: 1.5;
 }
+
+/* ── MOBILE RESPONSIVENESS ── */
+@media (max-width: 768px) {
+  .dashboard {
+    flex-direction: column !important;
+  }
+
+  .mobile-header {
+    display: flex !important; /* Overrides inline style="display: none" */
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--dash-sidebar);
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    height: 56px;
+    box-sizing: border-box;
+  }
+
+  .menu-toggle-btn {
+    background: var(--card-hover-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .menu-toggle-btn:hover {
+    background: var(--primary-glow);
+    border-color: var(--primary-light);
+  }
+
+  .dash-sidebar {
+    position: fixed !important;
+    top: 56px !important;
+    left: -260px !important;
+    width: 260px !important;
+    height: calc(100vh - 56px) !important;
+    z-index: 999 !important;
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    box-shadow: 4px 0 24px var(--shadow), 0 0 100px rgba(0, 0, 0, 0.4) !important;
+    border-right: 1px solid var(--border-color) !important;
+  }
+
+  .dash-sidebar.mobile-open {
+    left: 0 !important;
+  }
+
+  .dash-main {
+    width: 100% !important;
+    min-height: calc(100vh - 56px);
+  }
+
+  .dash-content {
+    padding: 24px 16px !important;
+  }
+
+  /* Grid layouts collapse to single column */
+  .profile-grid, .grid-2col, .grid-3col, .stats-row {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+
+  /* Chat layout responsiveness */
+  .chat-layout {
+    flex-direction: column !important;
+    height: auto !important;
+    min-height: 550px !important;
+  }
+
+  .chat-list {
+    width: 100% !important;
+    height: 180px !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border-color) !important;
+  }
+
+  .chat-window {
+    height: 400px !important;
+  }
+
+  /* Modals on mobile */
+  .modal-overlay {
+    padding: 10px !important;
+  }
+
+  .modal {
+    padding: 20px !important;
+    max-height: 90vh !important;
+    overflow-y: auto !important;
+  }
+}

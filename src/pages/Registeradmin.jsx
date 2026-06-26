@@ -1,7 +1,5 @@
 import { useState } from "react";
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
-import { auth, db } from "../firebase";
+import { supabase } from "../supabaseClient.js";
 import { useNavigate } from "react-router-dom";
 import "./Auth.css";
 
@@ -27,19 +25,23 @@ export default function RegisterAdmin() {
 
     setLoading(true);
     try {
-      const { user } = await createUserWithEmailAndPassword(auth, form.email, form.password);
-      await setDoc(doc(db, "users", user.uid), {
-        role: "admin",
+      const { data: { user }, error: authErr } = await supabase.auth.signUp({
         email: form.email,
-        createdAt: new Date(),
+        password: form.password,
       });
+      if (authErr) throw authErr;
+
+      const { error: dbErr } = await supabase.from("profiles").insert({
+        id: user.id,
+        role: "admin",
+        name: "Администратор",
+        email: form.email,
+      });
+      if (dbErr) throw dbErr;
+
       navigate("/dashboardAdmin");
     } catch (err) {
-      if (err.code === "auth/email-already-in-use") {
-        setError("Этот email уже зарегистрирован");
-      } else {
-        setError("Ошибка. Попробуй ещё раз.");
-      }
+      setError(err.message || "Ошибка. Попробуй ещё раз.");
     } finally {
       setLoading(false);
     }

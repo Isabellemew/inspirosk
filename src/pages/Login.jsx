@@ -1,10 +1,7 @@
 import { useState } from "react";
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "../firebase";
 import { useNavigate, Link } from "react-router-dom";
 import "./Auth.css";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "../firebase.js";
+import { supabase } from "../supabaseClient.js";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -13,29 +10,40 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-const handleLogin = async (e) => {
-  e.preventDefault();
-  setError("");
-  setLoading(true);
-  try {
-    const { user } = await signInWithEmailAndPassword(auth, email, password);
-    
-    // Получаем роль из Firestore
-    const snap = await getDoc(doc(db, "users", user.uid));
-    const role = snap.data()?.role;
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const { data: { user }, error: authErr } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+      if (authErr) throw authErr;
+      
+      const { data: profile, error: dbErr } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+        
+      if (dbErr || !profile) {
+        throw new Error("Профиль пользователя не найден");
+      }
+      
+      const role = profile.role;
+      if (role === "admin") navigate("/dashboardAdmin");
+      else if (role === "professor") navigate("/dashboardProfessor");
+      else if (role === "independent") navigate("/dashboardIndependent");
+      else if (role === "business") navigate("/dashboardBusiness");
+      else navigate("/dashboardStudent");
 
-    if (role === "admin") navigate("/dashboardAdmin");
-    else if (role === "professor") navigate("/dashboardProfessor");
-    else if (role === "independent") navigate("/dashboardIndependent");
-    else if (role === "business") navigate("/dashboardBusiness");
-    else navigate("/dashboardStudent");
-
-  } catch (err) {
-    setError("Неверный email или пароль");
-  } finally {
-    setLoading(false);
-  }
-};
+    } catch (err) {
+      setError(err.message || "Неверный email или пароль");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="auth-page">
